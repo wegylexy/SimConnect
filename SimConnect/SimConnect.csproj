@@ -7,7 +7,16 @@
     <Authors>WONG Tin Chi Timothy</Authors>
     <Company>Timmy Net Net Company</Company>
     <Product>Purely managed SimConnect client</Product>
-    <Copyright>(C) 2011 WONG Tin Chi Timothy. All rights reserved.</Copyright>
+    <Copyright>(C) 2021 WONG Tin Chi Timothy. All rights reserved.</Copyright>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
 </Project>
