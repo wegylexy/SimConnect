@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net5.0</TargetFramework>
+    <AssemblyName>FlyByWireless.SimConnect</AssemblyName>
+    <RootNamespace>FlyByWireless.SimConnect</RootNamespace>
+    <Authors>WONG Tin Chi Timothy</Authors>
+    <Company>Timmy Net Net Company</Company>
+    <Product>Purely managed SimConnect client</Product>
+    <Copyright>(C) 2011 WONG Tin Chi Timothy. All rights reserved.</Copyright>
+  </PropertyGroup>
+
+</Project>
