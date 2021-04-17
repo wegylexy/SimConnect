@@ -7,7 +7,7 @@ namespace FlyByWireless.SimConnect
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     readonly struct Recv
     {
-        public readonly uint Size, Version;
+        public readonly int Size, Version;
         public readonly RecvId Id;
     }
 
@@ -121,39 +121,39 @@ namespace FlyByWireless.SimConnect
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public unsafe readonly ref struct RecvSimObjectData<T> where T : unmanaged
+    unsafe readonly ref struct RecvSimObjectData
     {
         readonly Recv Recv;
         public readonly uint RequestId, ObjectId, DefineId;
         public readonly DataRequestFlags Flags;
         public readonly uint EntryNumber, OutOf;
-        readonly int _DefineCount, _Data;
+        public readonly int DefineCount;
+        readonly uint _Data;
 
-        public ReadOnlySpan<T> Data
+        public unsafe ReadOnlySpan<byte> Data
         {
             get
             {
-                // TODO: assert T against DefineId
-                fixed (void* b = &_Data)
-                    return new(b, _DefineCount);
+                fixed (void* p = &_Data)
+                    return new(p, Recv.Size - 40);
             }
         }
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public readonly ref struct RecvSimObjectDataByType<T> where T : unmanaged
+    readonly ref struct RecvSimObjectDataByType
     {
-        public readonly RecvSimObjectData<T> SimObjectData;
+        public readonly RecvSimObjectData SimObjectData;
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public readonly ref struct RecvClientData<T> where T : unmanaged
+    readonly ref struct RecvClientData<T> where T : unmanaged
     {
-        public readonly RecvSimObjectData<T> SimObjectData;
+        public readonly RecvSimObjectData SimObjectData;
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public readonly ref struct RecvWeatherObservation
+    readonly ref struct RecvWeatherObservation
     {
         readonly Recv Recv;
         public readonly uint RequestId;
@@ -161,7 +161,7 @@ namespace FlyByWireless.SimConnect
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public unsafe readonly ref struct RecvCloudState
+    unsafe readonly ref struct RecvCloudState
     {
         readonly Recv Recv;
         public readonly uint RequestId;
@@ -179,7 +179,7 @@ namespace FlyByWireless.SimConnect
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public readonly struct RecvAssignedObjectId
+    readonly struct RecvAssignedObjectId
     {
         readonly Recv Recv;
         public readonly uint RequestId, ObjectId;
@@ -249,7 +249,7 @@ namespace FlyByWireless.SimConnect
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public unsafe readonly ref struct RecvFacilitiesList<T> where T : unmanaged
+    unsafe readonly ref struct RecvFacilitiesList<T> where T : unmanaged
     {
         readonly Recv Recv;
         public readonly uint RequestId;

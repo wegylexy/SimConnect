@@ -1,13 +1,20 @@
 ﻿using FlyByWireless.IO;
+using FlyByWireless.SimConnect.Data;
 using System;
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
+using System.Linq;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 
 namespace FlyByWireless.SimConnect
@@ -16,6 +23,8 @@ namespace FlyByWireless.SimConnect
         uint ProtocolVersion,
         Version SimConnectVersion
     );
+
+    unsafe delegate void RecvSimObjectDataHandler(RecvSimObjectData* data);
 
     public sealed class SimConnect : IAsyncDisposable, IDisposable
     {
@@ -43,24 +52,66 @@ namespace FlyByWireless.SimConnect
 
         CancellationTokenSource? _quit;
 
-        uint _packetId = 0, _openPacketId, _protocol;
+        Task? _run;
+
+        uint _packetId = 0, _protocol, _defineId, _requestId;
+
+        readonly ConcurrentDictionary<uint, Type> _defineTypes = new();
+
+        readonly ConcurrentDictionary<Type, uint> _defineIds = new();
 
         readonly ConcurrentDictionary<uint, TaskCompletionSource<object>> _pending = new();
+
+        readonly ConcurrentDictionary<uint, RecvSimObjectDataHandler> _requests = new();
 
         public event EventHandler<ExternalException>? OnRecvException;
 
         public event EventHandler<RecvQuit>? OnRecvQuit;
 
+        void Disposed()
+        {
+            _pending.Clear();
+            _defineTypes.Clear();
+            _defineIds.Clear();
+        }
+
         public async ValueTask DisposeAsync()
         {
-            await using (ClientStream.ConfigureAwait(false))
-                _quit?.Cancel();
+            try
+            {
+                await using (ClientStream.ConfigureAwait(false))
+                {
+                    _quit?.Cancel();
+                    if (_run is Task r)
+                        await r;
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (EndOfStreamException) { }
+            catch (ObjectDisposedException) { }
+            finally
+            {
+                Disposed();
+            }
         }
 
         public void Dispose()
         {
-            using (ClientStream)
-                _quit?.Cancel();
+            try
+            {
+                using (ClientStream)
+                {
+                    _quit?.Cancel();
+                    _run?.GetAwaiter().GetResult();
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (EndOfStreamException) { }
+            catch (ObjectDisposedException) { }
+            finally
+            {
+                Disposed();
+            }
         }
 
         async ValueTask<uint> WriteAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
@@ -76,9 +127,9 @@ namespace FlyByWireless.SimConnect
             return id;
         }
 
-        async Task ReadAsync(CancellationToken cancellationToken = default)
+        async ValueTask ReadAsync(CancellationToken cancellationToken = default)
         {
-            var buffer = ArrayPool<byte>.Shared.Rent(4);
+            var buffer = ArrayPool<byte>.Shared.Rent(12);
             try
             {
                 await ClientStream.ReadFullyAsync(buffer.AsMemory(0, 12), cancellationToken).ConfigureAwait(false);
@@ -108,7 +159,7 @@ namespace FlyByWireless.SimConnect
                             break;
                         case RecvId.Open:
                             {
-                                if (_pending.TryRemove(_openPacketId, out var tcs))
+                                if (_pending.TryRemove(_packetId, out var tcs))
                                     tcs.SetResult(MemoryMarshal.AsRef<RecvOpen>(s));
                             }
                             break;
@@ -120,19 +171,29 @@ namespace FlyByWireless.SimConnect
                         case RecvId.EventObjectAddRemove: throw new NotImplementedException();
                         case RecvId.EventFileName: throw new NotImplementedException();
                         case RecvId.EventFrame: throw new NotImplementedException();
-                        case RecvId.SimObjectData: throw new NotImplementedException();
-                        case RecvId.SimObjectDataByType: throw new NotImplementedException();
+                        case RecvId.SimObjectData:
+                        case RecvId.SimObjectDataByType:
+                        case RecvId.ClientData:
+                            unsafe
+                            {
+                                fixed (void* p = s)
+                                {
+                                    var d = (RecvSimObjectData*)p;
+                                    if (_requests.TryGetValue(d->RequestId, out var callback))
+                                        callback(d);
+                                }
+                            }
+                            break;
                         case RecvId.WeatherObservation: throw new NotImplementedException();
                         case RecvId.CloudState: throw new NotImplementedException();
                         case RecvId.AssignedObjectId: throw new NotImplementedException();
                         case RecvId.ReservedKey: throw new NotImplementedException();
                         case RecvId.CustomAction: throw new NotImplementedException();
                         case RecvId.SystemState: throw new NotImplementedException();
-                        case RecvId.ClientData: throw new NotImplementedException();
                         case RecvId.EventWeatherMode: throw new NotImplementedException();
                         case RecvId.AirportList: throw new NotImplementedException();
-                        case RecvId.VorList: throw new NotImplementedException();
-                        case RecvId.NdbList: throw new NotImplementedException();
+                        case RecvId.VORList: throw new NotImplementedException();
+                        case RecvId.NDBList: throw new NotImplementedException();
                         case RecvId.WaypointList: throw new NotImplementedException();
                         case RecvId.EventMultiplayerServerStarted: throw new NotImplementedException();
                         case RecvId.EventMultiplayerClientStarted: throw new NotImplementedException();
@@ -150,17 +211,13 @@ namespace FlyByWireless.SimConnect
         }
 
         // TODO: support TCP, remote server, and config
-        public async Task<RecvOpen> OpenAsync(string applicationName, CancellationToken cancellationToken = default)
+        public async ValueTask<RecvOpen> OpenAsync(string applicationName, CancellationToken cancellationToken = default)
         {
             using (_quit) { }
             var lts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, (_quit = new()).Token);
             await ((NamedPipeClientStream)ClientStream).ConnectAsync(lts.Token).ConfigureAwait(false);
-            int size;
-            unsafe
-            {
-                size = sizeof(SendOpen);
-            }
             ExternalException ee = null!;
+            int size = Unsafe.SizeOf<SendOpen>();
             foreach (var protocol in _protocols)
             {
                 _protocol = protocol.ProtocolVersion;
@@ -170,7 +227,8 @@ namespace FlyByWireless.SimConnect
                     try
                     {
                         MemoryMarshal.AsRef<SendOpen>(a) = new(protocol, applicationName);
-                        _pending.TryAdd(_openPacketId = await WriteAsync(a.AsMemory(0, size), lts.Token).ConfigureAwait(false), tcs);
+                        var added = _pending.TryAdd(await WriteAsync(a.AsMemory(0, size), lts.Token).ConfigureAwait(false), tcs);
+                        Debug.Assert(added);
                     }
                     finally
                     {
@@ -181,22 +239,11 @@ namespace FlyByWireless.SimConnect
                 try
                 {
                     var open = (RecvOpen)await tcs.Task.ConfigureAwait(false);
-                    _ = Task.Factory.StartNew(async () =>
+                    _run = Task.Factory.StartNew(async () =>
                     {
                         using (lts)
-                        {
                             while (!lts.IsCancellationRequested)
-                            {
-                                try
-                                {
-                                    await ReadAsync(lts.Token).ConfigureAwait(false);
-                                }
-                                catch
-                                {
-                                    break;
-                                }
-                            }
-                        }
+                                await ReadAsync(lts.Token).ConfigureAwait(false);
                     }, TaskCreationOptions.LongRunning);
                     return open;
                 }
@@ -206,6 +253,119 @@ namespace FlyByWireless.SimConnect
                 }
             }
             throw ee;
+        }
+
+        public async ValueTask DefineDataAsync<T>(CancellationToken cancellationToken = default) where T : unmanaged
+        {
+            var id = Interlocked.Increment(ref _defineId);
+            if (!(_defineTypes.TryAdd(id, typeof(T)) && _defineIds.TryAdd(typeof(T), id)))
+                throw new InvalidOperationException();
+            Debug.Assert(typeof(T) is
+            {
+                IsValueType: true,
+                IsLayoutSequential: true,
+                StructLayoutAttribute: { Pack: 1 }
+            });
+            var size = Unsafe.SizeOf<SendAddToDataDefinition>();
+            var a = ArrayPool<byte>.Shared.Rent(size);
+            try
+            {
+                var m = a.AsMemory(0, size);
+                foreach (var f in typeof(T).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+                {
+                    var d = f.GetCustomAttribute<DataDefinitionAttribute>();
+                    Debug.Assert(d is not null && f.FieldType is var t && d.DatumType switch
+                    {
+                        DataType.Invalid => false,
+                        DataType.Int32 => t == typeof(int),
+                        DataType.Int64 => t == typeof(long),
+                        DataType.Float32 => t == typeof(float),
+                        DataType.Float64 => t == typeof(double),
+                        DataType.String8 => t == typeof(String8),
+                        DataType.String32 => t == typeof(String32),
+                        DataType.String64 => t == typeof(String64),
+                        DataType.String128 => t == typeof(String128),
+                        DataType.String256 => t == typeof(String256),
+                        DataType.String260 => t == typeof(String260),
+                        DataType.StringV => false,
+                        DataType.InitPosition => t == typeof(InitPosition),
+                        DataType.MarkerState => t == typeof(MarkerState),
+                        DataType.Waypoint => t == typeof(Waypoint),
+                        DataType.LatLonAlt => t == typeof(LatLonAlt),
+                        DataType.XYZ => t == typeof(XYZ),
+                        _ => false,
+                    });
+                    MemoryMarshal.AsRef<SendAddToDataDefinition>(m.Span) = new(id, d.DatumName, d.UnitsName, d.DatumType, d.Epsilon, d.DatumId);
+                    await WriteAsync(m, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(a);
+            }
+        }
+
+        public async ValueTask UndefineDataAsync<T>(CancellationToken cancellationToken = default) where T : unmanaged
+        {
+            if (_defineIds.TryRemove(typeof(T), out var id))
+            {
+                try
+                {
+                    var size = Unsafe.SizeOf<SendClearDataDefinition>();
+                    var a = ArrayPool<byte>.Shared.Rent(size);
+                    try
+                    {
+                        MemoryMarshal.AsRef<SendClearDataDefinition>(a) = new(id);
+                        await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        ArrayPool<byte>.Shared.Return(a);
+                    }
+                }
+                finally
+                {
+                    _defineTypes.TryRemove(id, out _);
+                }
+            }
+        }
+
+        public async ValueTask<T> RequestDataOnSimObjectAsync<T>(uint objectId, Period period, DataRequestFlags flags = DataRequestFlags.Default, uint origin = 0, uint interval = 0, uint limit = 0, CancellationToken cancellationToken = default) where T : unmanaged
+        {
+            _defineIds.TryGetValue(typeof(T), out var defineId);
+            var requestId = Interlocked.Increment(ref _requestId);
+            TaskCompletionSource<T> tcs = new();
+            unsafe
+            {
+                var buffer = new byte[sizeof(T)];
+                uint offset = 0;
+                _requests.TryAdd(requestId, data =>
+                {
+                    var length = (uint)data->Data.Length;
+                    fixed (byte* source = data->Data)
+                    fixed (byte* destination = &buffer[offset])
+                        Unsafe.CopyBlock(destination, source, length);
+                    offset += length;
+                    if (data->EntryNumber == data->OutOf)
+                    {
+                        // TODO: period?
+                        _requests.TryRemove(requestId, out _);
+                        tcs.SetResult(MemoryMarshal.AsRef<T>(buffer));
+                    }
+                });
+            }
+            var size = Unsafe.SizeOf<SendRequestDataOnSimObject>();
+            var a = ArrayPool<byte>.Shared.Rent(size);
+            try
+            {
+                MemoryMarshal.AsRef<SendRequestDataOnSimObject>(a) = new(requestId, defineId, objectId, period, flags, origin, interval, limit);
+                await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(a);
+            }
+            return await tcs.Task;
         }
     }
 }
