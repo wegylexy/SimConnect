@@ -13,9 +13,9 @@ namespace FlyByWireless.SimConnect
 
         public float Epsilon { get; }
 
-        public uint DatumId { get; }
+        internal int DatumId { get; set; }
 
-        public DataDefinitionAttribute(string datumName, string unitsName, DataType datumType = DataType.Float64, float epsilon = 0, uint datumId = uint.MaxValue) =>
-            (DatumName, UnitsName, DatumType, Epsilon, DatumId) = (datumName, unitsName, datumType, epsilon, datumId);
+        public DataDefinitionAttribute(string datumName, string unitsName, DataType datumType = DataType.Float64, float epsilon = 0) =>
+            (DatumName, UnitsName, DatumType, Epsilon) = (datumName, unitsName, datumType, epsilon);
     }
 }

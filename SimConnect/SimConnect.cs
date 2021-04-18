@@ -8,7 +8,6 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
-using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -24,7 +23,21 @@ namespace FlyByWireless.SimConnect
         Version SimConnectVersion
     );
 
-    unsafe delegate void RecvSimObjectDataHandler(RecvSimObjectData* data);
+    unsafe delegate void PointerAction(void* pointer);
+
+    public sealed class DataDefinition : IAsyncDisposable
+    {
+        internal uint DefineId { get; }
+
+        internal (int Offset, int Size)[] Used { get; }
+
+        readonly Func<ValueTask> _undefine;
+
+        internal DataDefinition(uint defineId, (int Offset, int Size)[] used, Func<ValueTask> undefine) =>
+            (DefineId, Used, _undefine) = (defineId, used, undefine);
+
+        public ValueTask DisposeAsync() => _undefine();
+    }
 
     public sealed class SimConnect : IAsyncDisposable, IDisposable
     {
@@ -58,11 +71,11 @@ namespace FlyByWireless.SimConnect
 
         readonly ConcurrentDictionary<uint, Type> _defineTypes = new();
 
-        readonly ConcurrentDictionary<Type, uint> _defineIds = new();
+        readonly ConcurrentDictionary<Type, DataDefinition> _defines = new();
 
         readonly ConcurrentDictionary<uint, TaskCompletionSource<object>> _pending = new();
 
-        readonly ConcurrentDictionary<uint, RecvSimObjectDataHandler> _requests = new();
+        readonly ConcurrentDictionary<uint, PointerAction> _requests = new();
 
         public event EventHandler<ExternalException>? OnRecvException;
 
@@ -72,7 +85,7 @@ namespace FlyByWireless.SimConnect
         {
             _pending.Clear();
             _defineTypes.Clear();
-            _defineIds.Clear();
+            _defines.Clear();
         }
 
         public async ValueTask DisposeAsync()
@@ -173,28 +186,27 @@ namespace FlyByWireless.SimConnect
                         case RecvId.EventFrame: throw new NotImplementedException();
                         case RecvId.SimObjectData:
                         case RecvId.SimObjectDataByType:
+                        case RecvId.WeatherObservation:
+                        case RecvId.CloudState:
+                        case RecvId.SystemState:
                         case RecvId.ClientData:
+                        case RecvId.AirportList:
+                        case RecvId.VORList:
+                        case RecvId.NDBList:
+                        case RecvId.WaypointList:
                             unsafe
                             {
                                 fixed (void* p = s)
                                 {
-                                    var d = (RecvSimObjectData*)p;
-                                    if (_requests.TryGetValue(d->RequestId, out var callback))
-                                        callback(d);
+                                    if (_requests.TryGetValue(((uint*)p)[3], out var callback))
+                                        callback(p);
                                 }
                             }
                             break;
-                        case RecvId.WeatherObservation: throw new NotImplementedException();
-                        case RecvId.CloudState: throw new NotImplementedException();
                         case RecvId.AssignedObjectId: throw new NotImplementedException();
                         case RecvId.ReservedKey: throw new NotImplementedException();
                         case RecvId.CustomAction: throw new NotImplementedException();
-                        case RecvId.SystemState: throw new NotImplementedException();
                         case RecvId.EventWeatherMode: throw new NotImplementedException();
-                        case RecvId.AirportList: throw new NotImplementedException();
-                        case RecvId.VORList: throw new NotImplementedException();
-                        case RecvId.NDBList: throw new NotImplementedException();
-                        case RecvId.WaypointList: throw new NotImplementedException();
                         case RecvId.EventMultiplayerServerStarted: throw new NotImplementedException();
                         case RecvId.EventMultiplayerClientStarted: throw new NotImplementedException();
                         case RecvId.EventMultiplayerSessionEnded: throw new NotImplementedException();
@@ -244,6 +256,7 @@ namespace FlyByWireless.SimConnect
                         using (lts)
                             while (!lts.IsCancellationRequested)
                                 await ReadAsync(lts.Token).ConfigureAwait(false);
+                        // TODO: clean up
                     }, TaskCreationOptions.LongRunning);
                     return open;
                 }
@@ -255,49 +268,83 @@ namespace FlyByWireless.SimConnect
             throw ee;
         }
 
-        public async ValueTask DefineDataAsync<T>(CancellationToken cancellationToken = default) where T : unmanaged
+        public async ValueTask<DataDefinition> DefineDataAsync<T>(CancellationToken cancellationToken = default) where T : unmanaged
         {
-            var id = Interlocked.Increment(ref _defineId);
-            if (!(_defineTypes.TryAdd(id, typeof(T)) && _defineIds.TryAdd(typeof(T), id)))
-                throw new InvalidOperationException();
-            Debug.Assert(typeof(T) is
-            {
-                IsValueType: true,
-                IsLayoutSequential: true,
-                StructLayoutAttribute: { Pack: 1 }
-            });
+            if (typeof(T) is not
+                {
+                    IsValueType: true,
+                    IsLayoutSequential: true,
+                    StructLayoutAttribute: { Pack: 1 }
+                })
+                throw new NotSupportedException(); // TODO: support when requested in tagged format
             var size = Unsafe.SizeOf<SendAddToDataDefinition>();
             var a = ArrayPool<byte>.Shared.Rent(size);
             try
             {
                 var m = a.AsMemory(0, size);
-                foreach (var f in typeof(T).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+                var fields = typeof(T).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                var used = new (int Offset, int Size)[fields.Length];
+                var id = Interlocked.Increment(ref _defineId);
+                DataDefinition define = new(id, used, async () =>
+                {
+                    if (_defines.TryRemove(typeof(T), out var d))
+                    {
+                        try
+                        {
+                            var size = Unsafe.SizeOf<SendClearDataDefinition>();
+                            var a = ArrayPool<byte>.Shared.Rent(size);
+                            try
+                            {
+                                MemoryMarshal.AsRef<SendClearDataDefinition>(a) = new(d.DefineId);
+                                await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false);
+                            }
+                            finally
+                            {
+                                ArrayPool<byte>.Shared.Return(a);
+                            }
+                        }
+                        finally
+                        {
+                            _defineTypes.TryRemove(id, out _);
+                        }
+                    }
+                });
+                if (!(_defineTypes.TryAdd(id, typeof(T)) && _defines.TryAdd(typeof(T), define)))
+                    throw new InvalidOperationException();
+                var datumId = 0;
+                var offset = 0;
+                foreach (var f in fields)
                 {
                     var d = f.GetCustomAttribute<DataDefinitionAttribute>();
-                    Debug.Assert(d is not null && f.FieldType is var t && d.DatumType switch
+                    var t = f.FieldType;
+                    unsafe
                     {
-                        DataType.Invalid => false,
-                        DataType.Int32 => t == typeof(int),
-                        DataType.Int64 => t == typeof(long),
-                        DataType.Float32 => t == typeof(float),
-                        DataType.Float64 => t == typeof(double),
-                        DataType.String8 => t == typeof(String8),
-                        DataType.String32 => t == typeof(String32),
-                        DataType.String64 => t == typeof(String64),
-                        DataType.String128 => t == typeof(String128),
-                        DataType.String256 => t == typeof(String256),
-                        DataType.String260 => t == typeof(String260),
-                        DataType.StringV => false,
-                        DataType.InitPosition => t == typeof(InitPosition),
-                        DataType.MarkerState => t == typeof(MarkerState),
-                        DataType.Waypoint => t == typeof(Waypoint),
-                        DataType.LatLonAlt => t == typeof(LatLonAlt),
-                        DataType.XYZ => t == typeof(XYZ),
-                        _ => false,
-                    });
+                        var s = d!.DatumType switch
+                        {
+                            DataType.Int32 when t == typeof(int) => sizeof(int),
+                            DataType.Int64 when t == typeof(long) => sizeof(long),
+                            DataType.Float32 when t == typeof(float) => sizeof(float),
+                            DataType.Float64 when t == typeof(double) => sizeof(double),
+                            DataType.String8 when t == typeof(String8) => sizeof(String8),
+                            DataType.String32 when t == typeof(String32) => sizeof(String32),
+                            DataType.String64 when t == typeof(String64) => sizeof(String64),
+                            DataType.String128 when t == typeof(String128) => sizeof(String128),
+                            DataType.String256 when t == typeof(String256) => sizeof(String256),
+                            DataType.String260 when t == typeof(String260) => sizeof(String260),
+                            DataType.InitPosition when t == typeof(InitPosition) => sizeof(InitPosition),
+                            DataType.MarkerState when t == typeof(MarkerState) => sizeof(MarkerState),
+                            DataType.Waypoint when t == typeof(Waypoint) => sizeof(Waypoint),
+                            DataType.LatLonAlt when t == typeof(LatLonAlt) => sizeof(LatLonAlt),
+                            DataType.XYZ when t == typeof(XYZ) => sizeof(XYZ),
+                            _ => throw new NotSupportedException("Datum type mismatch."),
+                        };
+                        used[d.DatumId = datumId++] = (offset, s);
+                        offset += s;
+                    }
                     MemoryMarshal.AsRef<SendAddToDataDefinition>(m.Span) = new(id, d.DatumName, d.UnitsName, d.DatumType, d.Epsilon, d.DatumId);
                     await WriteAsync(m, cancellationToken).ConfigureAwait(false);
                 }
+                return define;
             }
             finally
             {
@@ -305,67 +352,150 @@ namespace FlyByWireless.SimConnect
             }
         }
 
-        public async ValueTask UndefineDataAsync<T>(CancellationToken cancellationToken = default) where T : unmanaged
+        sealed class DataAsyncEnumerable<T> : IAsyncEnumerable<T> where T : unmanaged
         {
-            if (_defineIds.TryRemove(typeof(T), out var id))
+            ChannelReader<T>? _reader;
+
+            readonly Func<OperationCanceledException, ValueTask> _cancel;
+
+            public DataAsyncEnumerable(ChannelReader<T> reader, Func<OperationCanceledException, ValueTask> cancel) => (_reader, _cancel) = (reader, cancel);
+
+            public async IAsyncEnumerator<T> GetAsyncEnumerator(CancellationToken cancellationToken = default)
             {
-                try
+                ChannelReader<T>? r;
+                (r, _reader) = (_reader, null);
+                if (r is null)
+                    throw new InvalidOperationException();
+                for (; ; )
                 {
-                    var size = Unsafe.SizeOf<SendClearDataDefinition>();
+                    try
+                    {
+                        if (!await r.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
+                            break;
+                    }
+                    catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested)
+                    {
+                        await _cancel.Invoke(ex).ConfigureAwait(false);
+                    }
+                    var e = r.ReadAllAsync(cancellationToken).GetAsyncEnumerator(cancellationToken);
+                    for (; ; )
+                    {
+                        try
+                        {
+                            if (!await e.MoveNextAsync())
+                                break;
+                        }
+                        catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested)
+                        {
+                            await _cancel.Invoke(ex).ConfigureAwait(false);
+                            goto Complete;
+                        }
+                        yield return e.Current;
+                    }
+                }
+            Complete: { }
+            }
+        }
+
+        sealed class EmptyAsyncEnumerable<T> : IAsyncEnumerable<T> where T : unmanaged
+        {
+            public static EmptyAsyncEnumerable<T> Instance { get; } = new();
+
+            public IAsyncEnumerator<T> GetAsyncEnumerator(CancellationToken cancellationToken = default) => E.Instance;
+
+            class E : IAsyncEnumerator<T>
+            {
+                public static E Instance => new();
+
+                public T Current => default;
+
+                public ValueTask DisposeAsync() => default;
+
+                public ValueTask<bool> MoveNextAsync() => ValueTask.FromResult(false);
+            }
+        }
+
+        public async ValueTask<T> RequestDataOnSimObjectOnceAsync<T>(uint objectId, DataRequestFlags flags = DataRequestFlags.Default, CancellationToken cancellationToken = default) where T : unmanaged
+        {
+            var e = (await RequestDataOnSimObjectAsync<T>(objectId, Period.Once, flags, cancellationToken: cancellationToken).ConfigureAwait(false)).GetAsyncEnumerator(cancellationToken);
+            await using var _e = e.ConfigureAwait(false);
+            await e.MoveNextAsync().ConfigureAwait(false);
+            return e.Current;
+        }
+
+        public async ValueTask<IAsyncEnumerable<T>> RequestDataOnSimObjectAsync<T>(uint objectId, Period period, DataRequestFlags flags = DataRequestFlags.Default, uint origin = 0, uint interval = 0, uint limit = 0, CancellationToken cancellationToken = default) where T : unmanaged
+        {
+            if (period == Period.Never)
+                return EmptyAsyncEnumerable<T>.Instance;
+            DataDefinition define;
+            while (!_defines.TryGetValue(typeof(T), out define!))
+                await DefineDataAsync<T>(cancellationToken);
+            var tagged = flags == DataRequestFlags.Tagged;
+            var requestId = Interlocked.Increment(ref _requestId);
+            DataAsyncEnumerable<T> E()
+            {
+                var channel = Channel.CreateUnbounded<T>();
+                var w = channel.Writer;
+                uint written = 0;
+                var take = period == Period.Once ? 1 : limit;
+                unsafe
+                {
+                    var buffer = new byte[sizeof(T)];
+                    _requests.TryAdd(requestId, pointer =>
+                    {
+                        var data = ((RecvData*)pointer)->Data;
+                        if (tagged)
+                        {
+                            for (var i = 0; i < data.Length;)
+                            {
+                                var (offset, next) = define.Used[MemoryMarshal.AsRef<uint>(data[i..])];
+                                next += i += sizeof(uint);
+                                data[i..next].CopyTo(buffer.AsSpan(offset));
+                                i = next;
+                            }
+                        }
+                        else
+                        {
+                            data.CopyTo(buffer);
+                        }
+                        if (w.TryWrite(MemoryMarshal.AsRef<T>(buffer)) && (take == 0 || ++written < take))
+                            return;
+                        _requests.TryRemove(requestId, out _);
+                        w.TryComplete();
+                    });
+                }
+                return new(channel.Reader, async ex =>
+                {
+                    var size = Unsafe.SizeOf<SendRequestDataOnSimObject>();
                     var a = ArrayPool<byte>.Shared.Rent(size);
                     try
                     {
-                        MemoryMarshal.AsRef<SendClearDataDefinition>(a) = new(id);
-                        await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false);
+                        MemoryMarshal.AsRef<SendRequestDataOnSimObject>(a) = new(requestId, 0, 0, Period.Never);
+                        var writing = WriteAsync(a.AsMemory(0, size), default);
+                        _requests.TryRemove(requestId, out _);
+                        w.TryComplete(ex);
+                        await writing.ConfigureAwait(false);
                     }
                     finally
                     {
                         ArrayPool<byte>.Shared.Return(a);
                     }
-                }
-                finally
-                {
-                    _defineTypes.TryRemove(id, out _);
-                }
-            }
-        }
-
-        public async ValueTask<T> RequestDataOnSimObjectAsync<T>(uint objectId, Period period, DataRequestFlags flags = DataRequestFlags.Default, uint origin = 0, uint interval = 0, uint limit = 0, CancellationToken cancellationToken = default) where T : unmanaged
-        {
-            _defineIds.TryGetValue(typeof(T), out var defineId);
-            var requestId = Interlocked.Increment(ref _requestId);
-            TaskCompletionSource<T> tcs = new();
-            unsafe
-            {
-                var buffer = new byte[sizeof(T)];
-                uint offset = 0;
-                _requests.TryAdd(requestId, data =>
-                {
-                    var length = (uint)data->Data.Length;
-                    fixed (byte* source = data->Data)
-                    fixed (byte* destination = &buffer[offset])
-                        Unsafe.CopyBlock(destination, source, length);
-                    offset += length;
-                    if (data->EntryNumber == data->OutOf)
-                    {
-                        // TODO: period?
-                        _requests.TryRemove(requestId, out _);
-                        tcs.SetResult(MemoryMarshal.AsRef<T>(buffer));
-                    }
                 });
             }
+            var e = E();
             var size = Unsafe.SizeOf<SendRequestDataOnSimObject>();
             var a = ArrayPool<byte>.Shared.Rent(size);
             try
             {
-                MemoryMarshal.AsRef<SendRequestDataOnSimObject>(a) = new(requestId, defineId, objectId, period, flags, origin, interval, limit);
+                MemoryMarshal.AsRef<SendRequestDataOnSimObject>(a) = new(requestId, define.DefineId, objectId, period, flags, origin, interval, limit);
                 await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false);
             }
             finally
             {
                 ArrayPool<byte>.Shared.Return(a);
             }
-            return await tcs.Task;
+            // TODO: support modifying parameters (except tagged) during enumeration? even from Never to another period?
+            return e;
         }
     }
 }

@@ -1,6 +1,7 @@
 ﻿using FlyByWireless.SimConnect;
 using System;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 
 TaskCompletionSource tcs = new();
@@ -15,22 +16,33 @@ Console.WriteLine($"Application Name:\t{open.ApplicationName}");
 Console.WriteLine($"Application Version:\t{open.ApplicationVersion}");
 Console.WriteLine($"SimConnect Version:\t{open.SimConnectVersion}");
 
-await client.DefineDataAsync<LatLon>();
-Console.WriteLine("defined");
+{
+    await using var defined = await client.DefineDataAsync<Pose>();
+    Console.WriteLine("defined");
 
-var ll = await client.RequestDataOnSimObjectAsync<LatLon>(0, Period.Once);
-Console.WriteLine($"({ll.Latitude}, {ll.Longitude}, {ll.Altitude})");
-
-await client.UndefineDataAsync<LatLon>();
+    CancellationTokenSource cts = new(10000);
+    try
+    {
+        await foreach (var ll in (await client.RequestDataOnSimObjectAsync<Pose>(0, Period.Once, DataRequestFlags.Tagged, limit: 5)).WithCancellation(cts.Token))
+            Console.WriteLine($"({ll.Latitude}, {ll.Longitude}, {ll.Altitude}), {ll.TerrainElevationFt}ft = {ll.TerrainElevationM}m");
+    }
+    catch (OperationCanceledException) { }
+}
 Console.WriteLine("undefined");
 
 await tcs.Task;
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
-readonly struct LatLon
+readonly struct Pose
 {
+    [DataDefinition("GROUND ALTITUDE", "feet", DataType.Int32)]
+    public readonly int TerrainElevationFt;
+
     [DataDefinition("PLANE LATITUDE", "degrees")]
     public readonly double Latitude;
+
+    [DataDefinition("GROUND ALTITUDE", "meters", DataType.Int32)]
+    public readonly int TerrainElevationM;
 
     [DataDefinition("PLANE LONGITUDE", "degrees")]
     public readonly double Longitude;

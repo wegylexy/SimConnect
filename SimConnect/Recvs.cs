@@ -121,14 +121,13 @@ namespace FlyByWireless.SimConnect
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    unsafe readonly ref struct RecvSimObjectData
+    unsafe readonly ref struct RecvData
     {
         readonly Recv Recv;
         public readonly uint RequestId, ObjectId, DefineId;
         public readonly DataRequestFlags Flags;
         public readonly uint EntryNumber, OutOf;
-        public readonly int DefineCount;
-        readonly uint _Data;
+        readonly int _DefineCount, _Data;
 
         public unsafe ReadOnlySpan<byte> Data
         {
@@ -138,18 +137,6 @@ namespace FlyByWireless.SimConnect
                     return new(p, Recv.Size - 40);
             }
         }
-    }
-
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    readonly ref struct RecvSimObjectDataByType
-    {
-        public readonly RecvSimObjectData SimObjectData;
-    }
-
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    readonly ref struct RecvClientData<T> where T : unmanaged
-    {
-        public readonly RecvSimObjectData SimObjectData;
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]

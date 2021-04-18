@@ -36,10 +36,10 @@ namespace FlyByWireless.SimConnect
         readonly String256 DatumName, UnitsName;
         readonly DataType DatumType;
         readonly float Epsilon;
-        readonly uint DatumId;
+        readonly int DatumId;
 
         public unsafe SendAddToDataDefinition(uint defineId, string datumName, string unitsName,
-            DataType datumType = DataType.Float64, float epsilon = 0, uint datumId = uint.MaxValue) =>
+            DataType datumType = DataType.Float64, float epsilon = 0, int datumId = -1) =>
             (Send, DefineId, DatumName, UnitsName, DatumType, Epsilon, DatumId) =
                 (new(sizeof(SendAddToDataDefinition), 0xF000000C), defineId, datumName, unitsName, datumType, epsilon, datumId);
     }
