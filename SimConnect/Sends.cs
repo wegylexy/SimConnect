@@ -67,4 +67,16 @@ namespace FlyByWireless.SimConnect
             (Send, RequestId, DefineId, ObjectId, Period, Flags, Origin, Interval, Limit) =
                 (new(sizeof(SendRequestDataOnSimObject), 0xF000000E), requestId, defineId, objectId, period, flags, origin, interval, limit);
     }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    readonly struct SendRequestDataOnSimObjectType
+    {
+        readonly Send Send;
+        readonly uint RequestId, DefineId, RadiusMeters;
+        readonly SimObjectType Type;
+
+        public unsafe SendRequestDataOnSimObjectType(uint requestId, uint defineId, uint radiusMeters, SimObjectType type) =>
+            (Send, RequestId, DefineId, RadiusMeters, Type) =
+                (new(sizeof(SendRequestDataOnSimObjectType), 0xF000000F), requestId, defineId, radiusMeters, type);
+    }
 }

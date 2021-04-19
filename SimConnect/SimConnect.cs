@@ -41,6 +41,13 @@ namespace FlyByWireless.SimConnect
 
     public sealed class SimConnect : IAsyncDisposable, IDisposable
     {
+        static readonly UnboundedChannelOptions _channelOptions = new()
+        {
+            AllowSynchronousContinuations = true,
+            SingleReader = true,
+            SingleWriter = true
+        };
+
         static readonly ReadOnlyCollection<Protocol> _protocols = new(new Protocol[]
         {
             // new(4, new(1, 0, 20, 0)), // ESP
@@ -417,6 +424,7 @@ namespace FlyByWireless.SimConnect
 
         public async ValueTask<T> RequestDataOnSimObjectOnceAsync<T>(uint objectId, DataRequestFlags flags = DataRequestFlags.Default, CancellationToken cancellationToken = default) where T : unmanaged
         {
+            // TODO: optimize
             var e = (await RequestDataOnSimObjectAsync<T>(objectId, Period.Once, flags, cancellationToken: cancellationToken).ConfigureAwait(false)).GetAsyncEnumerator(cancellationToken);
             await using var _e = e.ConfigureAwait(false);
             await e.MoveNextAsync().ConfigureAwait(false);
@@ -425,26 +433,23 @@ namespace FlyByWireless.SimConnect
 
         public async ValueTask<IAsyncEnumerable<T>> RequestDataOnSimObjectAsync<T>(uint objectId, Period period, DataRequestFlags flags = DataRequestFlags.Default, uint origin = 0, uint interval = 0, uint limit = 0, CancellationToken cancellationToken = default) where T : unmanaged
         {
+            var define = _defines[typeof(T)];
             if (period == Period.Never)
                 return EmptyAsyncEnumerable<T>.Instance;
-            DataDefinition define;
-            while (!_defines.TryGetValue(typeof(T), out define!))
-                await DefineDataAsync<T>(cancellationToken);
-            var tagged = flags == DataRequestFlags.Tagged;
+            var size = Unsafe.SizeOf<SendRequestDataOnSimObject>();
             var requestId = Interlocked.Increment(ref _requestId);
-            DataAsyncEnumerable<T> E()
+            DataAsyncEnumerable<T> E(uint take)
             {
-                var channel = Channel.CreateUnbounded<T>();
-                var w = channel.Writer;
+                var channel = Channel.CreateUnbounded<T>(_channelOptions);
+                var writter = channel.Writer;
                 uint written = 0;
-                var take = period == Period.Once ? 1 : limit;
                 unsafe
                 {
-                    var buffer = new byte[sizeof(T)];
-                    _requests.TryAdd(requestId, pointer =>
+                    var buffer = flags == DataRequestFlags.Tagged ? new byte[sizeof(T)] : null;
+                    var added = _requests.TryAdd(requestId, pointer =>
                     {
                         var data = ((RecvData*)pointer)->Data;
-                        if (tagged)
+                        if (buffer != null)
                         {
                             for (var i = 0; i < data.Length;)
                             {
@@ -453,37 +458,34 @@ namespace FlyByWireless.SimConnect
                                 data[i..next].CopyTo(buffer.AsSpan(offset));
                                 i = next;
                             }
+                            data = buffer;
                         }
-                        else
-                        {
-                            data.CopyTo(buffer);
-                        }
-                        if (w.TryWrite(MemoryMarshal.AsRef<T>(buffer)) && (take == 0 || ++written < take))
+                        if (writter.TryWrite(MemoryMarshal.AsRef<T>(data)) && (take == 0 || ++written < take))
                             return;
                         _requests.TryRemove(requestId, out _);
-                        w.TryComplete();
+                        writter.TryComplete();
                     });
+                    Debug.Assert(added);
                 }
-                return new(channel.Reader, async ex =>
+                return new(channel.Reader, async e =>
                 {
-                    var size = Unsafe.SizeOf<SendRequestDataOnSimObject>();
-                    var a = ArrayPool<byte>.Shared.Rent(size);
-                    try
+                    if (_requests.TryRemove(requestId, out _) && writter.TryComplete(e))
                     {
-                        MemoryMarshal.AsRef<SendRequestDataOnSimObject>(a) = new(requestId, 0, 0, Period.Never);
-                        var writing = WriteAsync(a.AsMemory(0, size), default);
-                        _requests.TryRemove(requestId, out _);
-                        w.TryComplete(ex);
-                        await writing.ConfigureAwait(false);
-                    }
-                    finally
-                    {
-                        ArrayPool<byte>.Shared.Return(a);
+                        var a = ArrayPool<byte>.Shared.Rent(size);
+                        try
+                        {
+                            MemoryMarshal.AsRef<SendRequestDataOnSimObject>(a) = new(requestId, 0, 0, Period.Never);
+                            await WriteAsync(a.AsMemory(0, size), default).ConfigureAwait(false);
+                        }
+                        catch (ObjectDisposedException) { }
+                        finally
+                        {
+                            ArrayPool<byte>.Shared.Return(a);
+                        }
                     }
                 });
             }
-            var e = E();
-            var size = Unsafe.SizeOf<SendRequestDataOnSimObject>();
+            var e = E(period == Period.Once ? 1 : limit);
             var a = ArrayPool<byte>.Shared.Rent(size);
             try
             {
@@ -495,6 +497,64 @@ namespace FlyByWireless.SimConnect
                 ArrayPool<byte>.Shared.Return(a);
             }
             // TODO: support modifying parameters (except tagged) during enumeration? even from Never to another period?
+            return e;
+        }
+
+        public async ValueTask<IAsyncEnumerable<T>> RequestDataOnSimObjectTypeAsync<T>(uint radiusMeters, SimObjectType type, CancellationToken cancellationToken = default) where T : unmanaged
+        {
+            var define = _defines[typeof(T)];
+            var size = Unsafe.SizeOf<SendRequestDataOnSimObjectType>();
+            var requestId = Interlocked.Increment(ref _requestId);
+            DataAsyncEnumerable<T> E()
+            {
+                var channel = Channel.CreateUnbounded<T>(_channelOptions);
+                var writter = channel.Writer;
+                unsafe
+                {
+                    var added = _requests.TryAdd(requestId, pointer =>
+                    {
+                        var recv = (RecvData*)pointer;
+                        if (recv->EntryNumber != 0)
+                            writter.TryWrite(MemoryMarshal.AsRef<T>(recv->Data));
+                        if (recv->EntryNumber == recv->OutOf)
+                        {
+                            _requests.TryRemove(requestId, out _);
+                            writter.TryComplete();
+                        }
+                    });
+                    Debug.Assert(added);
+                }
+                return new(channel.Reader, async e =>
+                {
+                    if (_requests.TryRemove(requestId, out _) && writter.TryComplete(e))
+                    {
+                        var a = ArrayPool<byte>.Shared.Rent(size);
+                        try
+                        {
+                            MemoryMarshal.AsRef<SendRequestDataOnSimObjectType>(a) = new(requestId, 0, 0, default);
+                            await WriteAsync(a.AsMemory(0, size), default).ConfigureAwait(false);
+                        }
+                        catch (ObjectDisposedException) { }
+                        finally
+                        {
+                            ArrayPool<byte>.Shared.Return(a);
+                        }
+                    }
+                });
+            }
+            var e = E();
+            var a = ArrayPool<byte>.Shared.Rent(size);
+            try
+            {
+                MemoryMarshal.AsRef<SendRequestDataOnSimObjectType>(a) = new(requestId, 0, 0, default);
+                await WriteAsync(a.AsMemory(0, size), default).ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException) { }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(a);
+            }
+            // TODO: support modifying radius and/or type during enumeration?
             return e;
         }
     }
