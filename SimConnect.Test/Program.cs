@@ -1,4 +1,5 @@
 ﻿using FlyByWireless.SimConnect;
+using FlyByWireless.SimConnect.Data;
 using System;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -6,7 +7,8 @@ using System.Threading.Tasks;
 
 TaskCompletionSource tcs = new();
 using SimConnect client = new();
-client.OnRecvQuit += (_, _) =>
+client.UncaughtException += (_, e) => Console.Error.WriteLine(e.Message);
+client.Quit += (_) =>
 {
     Console.WriteLine("Quit received.");
     tcs.SetResult();
@@ -16,15 +18,25 @@ Console.WriteLine($"Application Name:\t{open.ApplicationName}");
 Console.WriteLine($"Application Version:\t{open.ApplicationVersion}");
 Console.WriteLine($"SimConnect Version:\t{open.SimConnectVersion}");
 
+for (var i = 0u; i < 20; ++i)
+    _ = (await client.MapClientEventToSimEventAsync(i, (_, j) => { }, "Custom.Test")).Mapped
+        .ContinueWith(task => Console.Error.WriteLine(task.Exception), TaskContinuationOptions.OnlyOnFaulted);
+
 {
-    await using var defined = await client.DefineDataAsync<Pose>();
-    Console.WriteLine("defined");
+    await using var defined = await client.DefineDataAsync<Info>();
+    _ = defined.Added.ContinueWith(task =>
+    {
+        if (task.IsFaulted)
+            Console.Error.WriteLine(task.Exception);
+        else
+            Console.WriteLine("defined");
+    });
 
     CancellationTokenSource cts = new(10000);
     try
     {
-        await foreach (var ll in (await client.RequestDataOnSimObjectAsync<Pose>(0, Period.Once, DataRequestFlags.Tagged, limit: 5)).WithCancellation(cts.Token))
-            Console.WriteLine($"({ll.Latitude}, {ll.Longitude}, {ll.Altitude}), {ll.TerrainElevationFt}ft = {ll.TerrainElevationM}m");
+        await foreach (var ll in (await client.RequestDataOnSimObjectAsync<Info>(0, Period.Once, DataRequestFlags.Tagged, limit: 5)).WithCancellation(cts.Token))
+            Console.WriteLine($"{ll.Title}: {ll.Struct_LatLonAlt}, {ll.AltitudeFt}ft = {ll.Plane_Altitude}m, ground={ll.Ground_Altitude}m");
     }
     catch (OperationCanceledException) { }
 }
@@ -33,20 +45,17 @@ Console.WriteLine("undefined");
 await tcs.Task;
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
-readonly struct Pose
+struct Info
 {
-    [DataDefinition("GROUND ALTITUDE", "feet", DataType.Int32)]
-    public readonly int TerrainElevationFt;
+    public String260 Title;
 
-    [DataDefinition("PLANE LATITUDE", "degrees")]
-    public readonly double Latitude;
+    [DataDefinition("PLANE ALTITUDE", "feet")]
+    public double AltitudeFt;
 
-    [DataDefinition("GROUND ALTITUDE", "meters", DataType.Int32)]
-    public readonly int TerrainElevationM;
+    public LatLonAlt Struct_LatLonAlt;
 
-    [DataDefinition("PLANE LONGITUDE", "degrees")]
-    public readonly double Longitude;
+    public double Plane_Altitude;
 
-    [DataDefinition("PLANE ALTITUDE", "meters")]
-    public readonly double Altitude;
+    [DataDefinition(unitsName: "meters")]
+    public double Ground_Altitude;
 }

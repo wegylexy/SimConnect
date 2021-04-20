@@ -1,5 +1,6 @@
 ﻿using FlyByWireless.IO;
 using FlyByWireless.SimConnect.Data;
+using Microsoft.Win32.SafeHandles;
 using System;
 using System.Buffers;
 using System.Collections.Concurrent;
@@ -25,22 +26,20 @@ namespace FlyByWireless.SimConnect
 
     unsafe delegate void PointerAction(void* pointer);
 
-    public sealed class DataDefinition : IAsyncDisposable
+    public sealed class AsyncException : System.Exception
     {
-        internal uint DefineId { get; }
+        public uint Index { get; }
 
-        internal (int Offset, int Size)[] Used { get; }
-
-        readonly Func<ValueTask> _undefine;
-
-        internal DataDefinition(uint defineId, (int Offset, int Size)[] used, Func<ValueTask> undefine) =>
-            (DefineId, Used, _undefine) = (defineId, used, undefine);
-
-        public ValueTask DisposeAsync() => _undefine();
+        internal AsyncException(RecvException exception) : base(exception.Exception.ToString()) =>
+            (HResult, Index) = ((int)exception.Exception, exception.Index);
     }
 
     public sealed class SimConnect : IAsyncDisposable, IDisposable
     {
+        [DllImport("kernel32", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool PeekNamedPipe(SafePipeHandle hNamedPipe, nint lpBuffer, uint nBufferSize, out uint lpBytesRead, out uint lpTotalBytesAvail, out uint lpBytesLeftThisMessage);
+
         static readonly UnboundedChannelOptions _channelOptions = new()
         {
             AllowSynchronousContinuations = true,
@@ -50,7 +49,7 @@ namespace FlyByWireless.SimConnect
 
         static readonly ReadOnlyCollection<Protocol> _protocols = new(new Protocol[]
         {
-            // new(4, new(1, 0, 20, 0)), // ESP
+            new(4, new(10, 0, 63003, 0)), // SE beta
             new(4, new(10, 0, 62615, 0)), // SE
             new(4, new(10, 0, 61637, 0)), // SP2
             new(4, new(10, 0, 61472, 0)), // SP2 1A
@@ -74,25 +73,35 @@ namespace FlyByWireless.SimConnect
 
         Task? _run;
 
-        uint _packetId = 0, _protocol, _defineId, _requestId;
+        uint _packetId = 0, _protocol, _defineId, _requestId, _eventId;
 
         readonly ConcurrentDictionary<uint, Type> _defineTypes = new();
 
         readonly ConcurrentDictionary<Type, DataDefinition> _defines = new();
 
-        readonly ConcurrentDictionary<uint, TaskCompletionSource<object>> _pending = new();
+        TaskCompletionSource<RecvOpen>? _open;
+
+        readonly ConcurrentDictionary<uint, TaskCompletionSource> _sents = new();
 
         readonly ConcurrentDictionary<uint, PointerAction> _requests = new();
 
-        public event EventHandler<ExternalException>? OnRecvException;
+        readonly ConcurrentDictionary<uint, EventHandler<int>> _eventHandlers = new();
 
-        public event EventHandler<RecvQuit>? OnRecvQuit;
+        readonly ConcurrentDictionary<string, (TaskCompletionSource<ReservedKey> Reserved, string Choice1, string? Choice2, string? Choice3)> _reservedKeys = new();
+
+        public event EventHandler<AsyncException>? UncaughtException;
+
+        public event Action<object>? Quit;
 
         void Disposed()
         {
-            _pending.Clear();
             _defineTypes.Clear();
             _defines.Clear();
+            _open = null;
+            _sents.Clear();
+            _requests.Clear();
+            _eventHandlers.Clear();
+            _reservedKeys.Clear();
         }
 
         public async ValueTask DisposeAsync()
@@ -134,7 +143,7 @@ namespace FlyByWireless.SimConnect
             }
         }
 
-        async ValueTask<uint> WriteAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        async ValueTask<Task> WriteAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
             uint Id()
             {
@@ -143,8 +152,11 @@ namespace FlyByWireless.SimConnect
                 return send[3] = Interlocked.Increment(ref _packetId);
             }
             var id = Id();
+            TaskCompletionSource tcs = new();
+            var added = _sents.TryAdd(id, tcs);
+            Debug.Assert(added);
             await ClientStream.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
-            return id;
+            return tcs.Task;
         }
 
         async ValueTask ReadAsync(CancellationToken cancellationToken = default)
@@ -171,23 +183,29 @@ namespace FlyByWireless.SimConnect
                         case RecvId.Exception:
                             {
                                 ref var r = ref MemoryMarshal.AsRef<RecvException>(s);
-                                var ex = new ExternalException(r.Exception.ToString(), (int)r.Exception);
-                                ex.Data.Add(nameof(r.Index), r.Index);
-                                if (!(_pending.TryRemove(r.SendId, out var tcs) && tcs.TrySetException(ex)))
-                                    OnRecvException?.Invoke(this, ex);
+                                var ex = new AsyncException(r);
+                                if (!(_sents.TryRemove(r.SendId, out var tcs) && tcs.TrySetException(ex)))
+                                    UncaughtException?.Invoke(this, ex);
                             }
                             break;
                         case RecvId.Open:
                             {
-                                if (_pending.TryRemove(_packetId, out var tcs))
-                                    tcs.SetResult(MemoryMarshal.AsRef<RecvOpen>(s));
+                                var open = _open;
+                                open?.TrySetResult(MemoryMarshal.AsRef<RecvOpen>(s));
+                                _open = null;
                             }
                             break;
                         case RecvId.Quit:
                             _quit?.Cancel();
-                            OnRecvQuit?.Invoke(this, MemoryMarshal.AsRef<RecvQuit>(s));
+                            Quit?.Invoke(this);
                             break;
-                        case RecvId.Event: throw new NotImplementedException();
+                        case RecvId.Event:
+                            {
+                                ref var e = ref MemoryMarshal.AsRef<RecvEvent>(s);
+                                if (_eventHandlers.TryGetValue(e.EventId, out var h))
+                                    h?.Invoke(this, e.Data);
+                            }
+                            break;
                         case RecvId.EventObjectAddRemove: throw new NotImplementedException();
                         case RecvId.EventFileName: throw new NotImplementedException();
                         case RecvId.EventFrame: throw new NotImplementedException();
@@ -211,7 +229,13 @@ namespace FlyByWireless.SimConnect
                             }
                             break;
                         case RecvId.AssignedObjectId: throw new NotImplementedException();
-                        case RecvId.ReservedKey: throw new NotImplementedException();
+                        case RecvId.ReservedKey:
+                            {
+                                ReservedKey k = new(MemoryMarshal.AsRef<RecvReservedKey>(s));
+                                if (_reservedKeys.TryRemove(k.Chosen, out var t))
+                                    t.Reserved.TrySetResult(k);
+                            }
+                            break;
                         case RecvId.CustomAction: throw new NotImplementedException();
                         case RecvId.EventWeatherMode: throw new NotImplementedException();
                         case RecvId.EventMultiplayerServerStarted: throw new NotImplementedException();
@@ -219,6 +243,7 @@ namespace FlyByWireless.SimConnect
                         case RecvId.EventMultiplayerSessionEnded: throw new NotImplementedException();
                         case RecvId.EventRaceEnd: throw new NotImplementedException();
                         case RecvId.EnentRaceLap: throw new NotImplementedException();
+                        default: throw new NotSupportedException();
                     }
                 }
                 Parse();
@@ -227,6 +252,15 @@ namespace FlyByWireless.SimConnect
             {
                 ArrayPool<byte>.Shared.Return(buffer);
             }
+            try
+            {
+                if (ClientStream is NamedPipeClientStream s && PeekNamedPipe(s.SafePipeHandle, 0, 0, out _, out var a, out _) && a > 0)
+                    return;
+            }
+            catch (DllNotFoundException) { }
+            foreach (var id in _sents.Keys)
+                if (_sents.TryRemove(id, out var t))
+                    t.TrySetResult();
         }
 
         // TODO: support TCP, remote server, and config
@@ -240,14 +274,15 @@ namespace FlyByWireless.SimConnect
             foreach (var protocol in _protocols)
             {
                 _protocol = protocol.ProtocolVersion;
-                TaskCompletionSource<object> tcs = new();
+                _open = new();
+                var opening = _open.Task;
+                Task fail;
                 {
                     var a = ArrayPool<byte>.Shared.Rent(size);
                     try
                     {
                         MemoryMarshal.AsRef<SendOpen>(a) = new(protocol, applicationName);
-                        var added = _pending.TryAdd(await WriteAsync(a.AsMemory(0, size), lts.Token).ConfigureAwait(false), tcs);
-                        Debug.Assert(added);
+                        fail = await WriteAsync(a.AsMemory(0, size), lts.Token).ConfigureAwait(false);
                     }
                     finally
                     {
@@ -257,7 +292,9 @@ namespace FlyByWireless.SimConnect
                 await ReadAsync(lts.Token).ConfigureAwait(false);
                 try
                 {
-                    var open = (RecvOpen)await tcs.Task.ConfigureAwait(false);
+                    _ = await Task.WhenAny(opening, fail).ConfigureAwait(false);
+                    var open = opening.Result;
+                    _open = null;
                     _run = Task.Factory.StartNew(async () =>
                     {
                         using (lts)
@@ -275,6 +312,160 @@ namespace FlyByWireless.SimConnect
             throw ee;
         }
 
+        public async ValueTask<ClientEvent> MapClientEventToSimEventAsync(uint groupId, EventHandler<int> handler, string? eventName = null, bool maskable = false, CancellationToken cancellationToken = default)
+        {
+            var id = Interlocked.Increment(ref _eventId);
+            var added = _eventHandlers.TryAdd(id, handler);
+            Debug.Assert(added);
+            var mapSize = Unsafe.SizeOf<SendMapClientEventToSimEvent>();
+            var addSize = Unsafe.SizeOf<SendAddClientEventToNotificationGroupAsync>();
+            var a = ArrayPool<byte>.Shared.Rent(Math.Max(mapSize, addSize));
+            try
+            {
+                MemoryMarshal.AsRef<SendMapClientEventToSimEvent>(a) = new(id, eventName);
+                var mapping = await WriteAsync(a.AsMemory(0, mapSize), cancellationToken).ConfigureAwait(false);
+                MemoryMarshal.AsRef<SendAddClientEventToNotificationGroupAsync>(a) = new(groupId, id, maskable);
+                var adding = await WriteAsync(a.AsMemory(0, addSize), cancellationToken).ConfigureAwait(false);
+                return new(id, handler, Task.WhenAll(
+                    mapping.ContinueWith(task =>
+                    {
+                        if (task.Exception?.InnerException is AsyncException ee)
+                            throw new ArgumentException(ee.Message, ee.Index switch
+                            {
+                                2 => nameof(eventName),
+                                _ => throw ee
+                            });
+                    }, TaskContinuationOptions.OnlyOnFaulted),
+                    adding.ContinueWith(task =>
+                    {
+                        if (task.Exception?.InnerException is AsyncException ee)
+                            throw new ArgumentException(ee.Message, ee.Index switch
+                            {
+                                1 => nameof(groupId),
+                                3 => nameof(maskable),
+                                _ => throw ee
+                            });
+                    }, TaskContinuationOptions.OnlyOnFaulted)
+                ), async () =>
+                {
+                    var size = Unsafe.SizeOf<SendRemoveClientEventAsync>();
+                    var a = ArrayPool<byte>.Shared.Rent(size);
+                    try
+                    {
+                        MemoryMarshal.AsRef<SendRemoveClientEventAsync>(a) = new(groupId, id);
+                        _ = await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        ArrayPool<byte>.Shared.Return(a);
+                    }
+                });
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(a);
+            }
+        }
+
+        public async ValueTask<Task> TransmitClientEventAsync(ClientEvent mappedEvent, uint objectId, int data, uint groupId, EventFlags flags, CancellationToken cancellationToken = default)
+        {
+            var size = Unsafe.SizeOf<SendTransmitClientEvent>();
+            var a = ArrayPool<byte>.Shared.Rent(size);
+            try
+            {
+                MemoryMarshal.AsRef<SendTransmitClientEvent>(a) = new(objectId, mappedEvent.EventId, data, groupId, flags);
+                return (await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false)).ContinueWith(task =>
+                {
+                    if (task.Exception?.InnerException is AsyncException ee)
+                        throw new ArgumentException(ee.Message, ee.Index switch
+                        {
+                            1 => nameof(objectId),
+                            3 => nameof(data),
+                            4 => nameof(groupId),
+                            5 => nameof(flags),
+                            _ => throw ee
+                        });
+                }, TaskContinuationOptions.OnlyOnFaulted);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(a);
+            }
+        }
+
+        public async ValueTask<Task> SetNotificationGroupPriorityAsync(uint groupId, GroupPriority priority, CancellationToken cancellationToken = default)
+        {
+            var size = Unsafe.SizeOf<SendSetNotificationGroupPriority>();
+            var a = ArrayPool<byte>.Shared.Rent(size);
+            try
+            {
+                MemoryMarshal.AsRef<SendSetNotificationGroupPriority>(a) = new(groupId, priority);
+                return (await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false)).ContinueWith(task =>
+                {
+                    if (task.Exception?.InnerException is AsyncException ee)
+                        throw new ArgumentException(ee.Message, ee.Index switch
+                        {
+                            1 => nameof(groupId),
+                            2 => nameof(priority),
+                            _ => throw ee
+                        });
+                }, TaskContinuationOptions.OnlyOnFaulted);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(a);
+            }
+        }
+
+        public async ValueTask<Task> ClearNotificationGroupAsync(uint groupId, CancellationToken cancellationToken = default)
+        {
+            var size = Unsafe.SizeOf<SendClearNotificationGroup>();
+            var a = ArrayPool<byte>.Shared.Rent(size);
+            try
+            {
+                MemoryMarshal.AsRef<SendClearNotificationGroup>(a) = new(groupId);
+                return (await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false)).ContinueWith(task =>
+                {
+                    if (task.Exception?.InnerException is AsyncException ee)
+                        throw new ArgumentException(ee.Message, ee.Index switch
+                        {
+                            1 => nameof(groupId),
+                            _ => throw ee
+                        });
+                }, TaskContinuationOptions.OnlyOnFaulted);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(a);
+            }
+        }
+
+        public async ValueTask<Task> RequestNotificationGroupAsync(uint groupId, uint reserved = 0, uint flags = 0, CancellationToken cancellationToken = default)
+        {
+            var size = Unsafe.SizeOf<SendRequestNotificationGroup>();
+            var a = ArrayPool<byte>.Shared.Rent(size);
+            try
+            {
+                MemoryMarshal.AsRef<SendRequestNotificationGroup>(a) = new(groupId, reserved, flags);
+                return (await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false)).ContinueWith(task =>
+                {
+                    if (task.Exception?.InnerException is AsyncException ee)
+                        throw new ArgumentException(ee.Message, ee.Index switch
+                        {
+                            1 => nameof(groupId),
+                            2 => nameof(reserved),
+                            3 => nameof(flags),
+                            _ => throw ee
+                        });
+                }, TaskContinuationOptions.OnlyOnFaulted);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(a);
+            }
+        }
+
+        #region SimObject Data
         public async ValueTask<DataDefinition> DefineDataAsync<T>(CancellationToken cancellationToken = default) where T : unmanaged
         {
             if (typeof(T) is not
@@ -292,10 +483,58 @@ namespace FlyByWireless.SimConnect
                 var fields = typeof(T).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 var used = new (int Offset, int Size)[fields.Length];
                 var id = Interlocked.Increment(ref _defineId);
-                DataDefinition define = new(id, used, async () =>
+                if (!(_defineTypes.TryAdd(id, typeof(T)) && _defines.TryAdd(typeof(T), null!)))
+                    throw new InvalidOperationException();
+                var datumId = 0;
+                var offset = 0;
+                var adding = new Task[fields.Length];
+                foreach (var f in fields)
+                {
+                    var d = f.GetCustomAttribute<DataDefinitionAttribute>() ?? new();
+                    unsafe
+                    {
+                        var (t, s) = f.FieldType.Name switch
+                        {
+                            nameof(Int32) => (DataType.Int32, sizeof(int)),
+                            nameof(Int64) => (DataType.Int64, sizeof(long)),
+                            nameof(Single) => (DataType.Float32, sizeof(float)),
+                            nameof(Double) => (DataType.Float64, sizeof(double)),
+                            nameof(String8) when d.UnitsName is null => (DataType.String8, sizeof(String8)),
+                            nameof(String32) when d.UnitsName is null => (DataType.String32, sizeof(String32)),
+                            nameof(String64) when d.UnitsName is null => (DataType.String64, sizeof(String64)),
+                            nameof(String128) when d.UnitsName is null => (DataType.String128, sizeof(String128)),
+                            nameof(String256) when d.UnitsName is null => (DataType.String256, sizeof(String256)),
+                            nameof(String260) when d.UnitsName is null => (DataType.String260, sizeof(String260)),
+                            nameof(MarkerState) when d.UnitsName is null => (DataType.MarkerState, sizeof(MarkerState)),
+                            nameof(Waypoint) when d.UnitsName is null => (DataType.Waypoint, sizeof(Waypoint)),
+                            nameof(LatLonAlt) when d.UnitsName is null => (DataType.LatLonAlt, sizeof(LatLonAlt)),
+                            nameof(XYZ) when d.UnitsName is null => (DataType.XYZ, sizeof(XYZ)),
+                            _ => throw new NotSupportedException("Datum type and/or units name mismatch."),
+                        };
+                        used[d.DatumId = datumId] = (offset, s);
+                        offset += s;
+                        MemoryMarshal.AsRef<SendAddToDataDefinition>(m.Span) =
+                            new(id, d.DatumName ?? f.Name.ToUpperInvariant().Replace('_', ' '), d.UnitsName, t, d.Epsilon, d.DatumId);
+                    }
+                    adding[datumId] = (await WriteAsync(m, cancellationToken).ConfigureAwait(false)).ContinueWith(task =>
+                    {
+                        if (task.Exception?.InnerException is AsyncException ee)
+                            throw new DataDefinitionException(f, ee.Index switch
+                            {
+                                2 => nameof(d.DatumName),
+                                3 => nameof(d.UnitsName),
+                                5 => nameof(d.Epsilon),
+                                _ => throw ee
+                            }, (Exception)ee.HResult);
+                    }, TaskContinuationOptions.OnlyOnFaulted);
+                    ++datumId;
+                }
+                // TODO: use CollectionsMarshal in .NET 6
+                return _defines[typeof(T)] = new(id, used, Task.WhenAll(adding), async () =>
                 {
                     if (_defines.TryRemove(typeof(T), out var d))
                     {
+                        // TODO: change period to never
                         try
                         {
                             var size = Unsafe.SizeOf<SendClearDataDefinition>();
@@ -303,7 +542,7 @@ namespace FlyByWireless.SimConnect
                             try
                             {
                                 MemoryMarshal.AsRef<SendClearDataDefinition>(a) = new(d.DefineId);
-                                await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false);
+                                _ = await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false);
                             }
                             finally
                             {
@@ -316,42 +555,6 @@ namespace FlyByWireless.SimConnect
                         }
                     }
                 });
-                if (!(_defineTypes.TryAdd(id, typeof(T)) && _defines.TryAdd(typeof(T), define)))
-                    throw new InvalidOperationException();
-                var datumId = 0;
-                var offset = 0;
-                foreach (var f in fields)
-                {
-                    var d = f.GetCustomAttribute<DataDefinitionAttribute>();
-                    var t = f.FieldType;
-                    unsafe
-                    {
-                        var s = d!.DatumType switch
-                        {
-                            DataType.Int32 when t == typeof(int) => sizeof(int),
-                            DataType.Int64 when t == typeof(long) => sizeof(long),
-                            DataType.Float32 when t == typeof(float) => sizeof(float),
-                            DataType.Float64 when t == typeof(double) => sizeof(double),
-                            DataType.String8 when t == typeof(String8) => sizeof(String8),
-                            DataType.String32 when t == typeof(String32) => sizeof(String32),
-                            DataType.String64 when t == typeof(String64) => sizeof(String64),
-                            DataType.String128 when t == typeof(String128) => sizeof(String128),
-                            DataType.String256 when t == typeof(String256) => sizeof(String256),
-                            DataType.String260 when t == typeof(String260) => sizeof(String260),
-                            DataType.InitPosition when t == typeof(InitPosition) => sizeof(InitPosition),
-                            DataType.MarkerState when t == typeof(MarkerState) => sizeof(MarkerState),
-                            DataType.Waypoint when t == typeof(Waypoint) => sizeof(Waypoint),
-                            DataType.LatLonAlt when t == typeof(LatLonAlt) => sizeof(LatLonAlt),
-                            DataType.XYZ when t == typeof(XYZ) => sizeof(XYZ),
-                            _ => throw new NotSupportedException("Datum type mismatch."),
-                        };
-                        used[d.DatumId = datumId++] = (offset, s);
-                        offset += s;
-                    }
-                    MemoryMarshal.AsRef<SendAddToDataDefinition>(m.Span) = new(id, d.DatumName, d.UnitsName, d.DatumType, d.Epsilon, d.DatumId);
-                    await WriteAsync(m, cancellationToken).ConfigureAwait(false);
-                }
-                return define;
             }
             finally
             {
@@ -438,10 +641,10 @@ namespace FlyByWireless.SimConnect
                 return EmptyAsyncEnumerable<T>.Instance;
             var size = Unsafe.SizeOf<SendRequestDataOnSimObject>();
             var requestId = Interlocked.Increment(ref _requestId);
+            var channel = Channel.CreateUnbounded<T>(_channelOptions);
+            var writter = channel.Writer;
             DataAsyncEnumerable<T> E(uint take)
             {
-                var channel = Channel.CreateUnbounded<T>(_channelOptions);
-                var writter = channel.Writer;
                 uint written = 0;
                 unsafe
                 {
@@ -475,7 +678,7 @@ namespace FlyByWireless.SimConnect
                         try
                         {
                             MemoryMarshal.AsRef<SendRequestDataOnSimObject>(a) = new(requestId, 0, 0, Period.Never);
-                            await WriteAsync(a.AsMemory(0, size), default).ConfigureAwait(false);
+                            _ = await WriteAsync(a.AsMemory(0, size), default).ConfigureAwait(false);
                         }
                         catch (ObjectDisposedException) { }
                         finally
@@ -490,7 +693,20 @@ namespace FlyByWireless.SimConnect
             try
             {
                 MemoryMarshal.AsRef<SendRequestDataOnSimObject>(a) = new(requestId, define.DefineId, objectId, period, flags, origin, interval, limit);
-                await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false);
+                _ = (await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false)).ContinueWith(task =>
+                {
+                    if (task.Exception?.InnerException is AsyncException ee)
+                        writter.TryComplete(new ArgumentException(ee.Message, ee.Index switch
+                        {
+                            3 => nameof(objectId),
+                            4 => nameof(period),
+                            5 => nameof(flags),
+                            6 => nameof(origin),
+                            7 => nameof(interval),
+                            8 => nameof(limit),
+                            _ => throw ee
+                        }));
+                }, TaskContinuationOptions.OnlyOnFaulted);
             }
             finally
             {
@@ -505,10 +721,10 @@ namespace FlyByWireless.SimConnect
             var define = _defines[typeof(T)];
             var size = Unsafe.SizeOf<SendRequestDataOnSimObjectType>();
             var requestId = Interlocked.Increment(ref _requestId);
+            var channel = Channel.CreateUnbounded<T>(_channelOptions);
+            var writter = channel.Writer;
             DataAsyncEnumerable<T> E()
             {
-                var channel = Channel.CreateUnbounded<T>(_channelOptions);
-                var writter = channel.Writer;
                 unsafe
                 {
                     var added = _requests.TryAdd(requestId, pointer =>
@@ -532,7 +748,7 @@ namespace FlyByWireless.SimConnect
                         try
                         {
                             MemoryMarshal.AsRef<SendRequestDataOnSimObjectType>(a) = new(requestId, 0, 0, default);
-                            await WriteAsync(a.AsMemory(0, size), default).ConfigureAwait(false);
+                            _ = await WriteAsync(a.AsMemory(0, size), default).ConfigureAwait(false);
                         }
                         catch (ObjectDisposedException) { }
                         finally
@@ -547,15 +763,231 @@ namespace FlyByWireless.SimConnect
             try
             {
                 MemoryMarshal.AsRef<SendRequestDataOnSimObjectType>(a) = new(requestId, 0, 0, default);
-                await WriteAsync(a.AsMemory(0, size), default).ConfigureAwait(false);
+                _ = (await WriteAsync(a.AsMemory(0, size), default).ConfigureAwait(false)).ContinueWith(task =>
+                {
+                    if (task.Exception?.InnerException is AsyncException ee)
+                        writter.TryComplete(new ArgumentException(ee.Message, ee.Index switch
+                        {
+                            3 => nameof(radiusMeters),
+                            4 => nameof(type),
+                            _ => throw ee
+                        }));
+                }, TaskContinuationOptions.OnlyOnFaulted);
             }
             catch (ObjectDisposedException) { }
             finally
             {
                 ArrayPool<byte>.Shared.Return(a);
             }
-            // TODO: support modifying radius and/or type during enumeration?
             return e;
+        }
+
+        public ValueTask<Task> SetDataOnSimObjectAsync<T>(uint objectId, ref T data, CancellationToken cancellationToken = default) where T : unmanaged =>
+            SetDataOnSimObjectAsync(objectId, MemoryMarshal.CreateReadOnlySpan(ref data, 1), cancellationToken);
+
+        public ValueTask<Task> SetDataOnSimObjectAsync<T>(uint objectId, ReadOnlySpan<T> data, CancellationToken cancellationToken = default) where T : unmanaged
+        {
+            Debug.Assert(!data.IsEmpty);
+            var define = _defines[typeof(T)];
+            var size = Unsafe.SizeOf<SendSetDataOnSimObject<T>>() + Unsafe.SizeOf<T>() * (data.Length - 1);
+            var a = ArrayPool<byte>.Shared.Rent(size);
+            try
+            {
+                MemoryMarshal.AsRef<SendSetDataOnSimObject<T>>(a) = new(define.DefineId, objectId, data);
+            }
+            catch
+            {
+                ArrayPool<byte>.Shared.Return(a);
+            }
+            async ValueTask<Task> Async()
+            {
+                try
+                {
+                    return (await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false)).ContinueWith(task =>
+                    {
+                        if (task.Exception?.InnerException is AsyncException ee)
+                            throw new ArgumentException(ee.Message, ee.Index switch
+                            {
+                                2 => nameof(objectId),
+                                6 => nameof(data),
+                                _ => throw ee
+                            });
+                    }, TaskContinuationOptions.OnlyOnFaulted);
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(a);
+                }
+            }
+            return Async();
+        }
+        #endregion
+
+        public async ValueTask<InputEvent> MapInputEventToClientEventAsync(uint groupId, string inputDefinition, ClientEvent? downHandler = null, int downValue = 0, ClientEvent? upHandler = null, int upValue = 0, bool maskable = false, CancellationToken cancellationToken = default)
+        {
+            uint downId = downHandler?.EventId ?? uint.MaxValue, upId = upHandler?.EventId ?? uint.MaxValue;
+            var size = Unsafe.SizeOf<SendMapInputEventToClientEvent>();
+            var a = ArrayPool<byte>.Shared.Rent(size);
+            try
+            {
+                MemoryMarshal.AsRef<SendMapInputEventToClientEvent>(a) = new(groupId, inputDefinition, downId, downValue, upId, upValue, maskable);
+                return new(inputDefinition, (await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false)).ContinueWith(task =>
+                {
+                    if (task.Exception?.InnerException is AsyncException ee)
+                        throw new ArgumentException(ee.Message, ee.Index switch
+                        {
+                            1 => nameof(groupId),
+                            2 => nameof(inputDefinition),
+                            4 => nameof(downValue),
+                            6 => nameof(upValue),
+                            7 => nameof(maskable),
+                            _ => throw ee
+                        });
+                }, TaskContinuationOptions.OnlyOnFaulted), async () =>
+                {
+                    var size = Unsafe.SizeOf<SendRemoveInputEvent>();
+                    var a = ArrayPool<byte>.Shared.Rent(size);
+                    try
+                    {
+                        MemoryMarshal.AsRef<SendRemoveInputEvent>(a) = new(groupId, inputDefinition);
+                        _ = await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        ArrayPool<byte>.Shared.Return(a);
+                    }
+                });
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(a);
+            }
+        }
+
+        public async ValueTask<Task> SetInputGroupPriorityAsync(uint groupId, GroupPriority priority, CancellationToken cancellationToken)
+        {
+            var size = Unsafe.SizeOf<SendSetInputGroupPriority>();
+            var a = ArrayPool<byte>.Shared.Rent(size);
+            try
+            {
+                MemoryMarshal.AsRef<SendSetInputGroupPriority>(a) = new(groupId, priority);
+                return (await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false)).ContinueWith(task =>
+                {
+                    if (task.Exception?.InnerException is AsyncException ee)
+                        throw new ArgumentException(ee.Message, ee.Index switch
+                        {
+                            2 => nameof(priority),
+                            _ => throw ee
+                        });
+                }, TaskContinuationOptions.OnlyOnFaulted);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(a);
+            }
+        }
+
+        public async ValueTask<Task> ClearInputGroupAsync(uint groupId, CancellationToken cancellationToken = default)
+        {
+            var size = Unsafe.SizeOf<SendClearInputGroup>();
+            var a = ArrayPool<byte>.Shared.Rent(size);
+            try
+            {
+                MemoryMarshal.AsRef<SendClearInputGroup>(a) = new(groupId);
+                return (await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false)).ContinueWith(task =>
+                {
+                    if (task.Exception?.InnerException is AsyncException ee)
+                        throw new ArgumentException(ee.Message, ee.Index switch
+                        {
+                            1 => nameof(groupId),
+                            _ => throw ee
+                        });
+                }, TaskContinuationOptions.OnlyOnFaulted);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(a);
+            }
+        }
+
+        public async ValueTask<Task> SetInputGroupStateAsync(uint groupId, State state, CancellationToken cancellationToken = default)
+        {
+            var size = Unsafe.SizeOf<SendSetInputGroupState>();
+            var a = ArrayPool<byte>.Shared.Rent(size);
+            try
+            {
+                MemoryMarshal.AsRef<SendSetInputGroupState>(a) = new(groupId, state);
+                return (await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false)).ContinueWith(task =>
+                {
+                    if (task.Exception?.InnerException is AsyncException ee)
+                        throw new ArgumentException(ee.Message, ee.Index switch
+                        {
+                            1 => nameof(groupId),
+                            2 => nameof(state),
+                            _ => throw ee
+                        });
+                }, TaskContinuationOptions.OnlyOnFaulted);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(a);
+            }
+        }
+
+        public async ValueTask<ReservedKey> RequestReservedKeyAsync(ClientEvent mappedEvent, string keyChoice1, string? keyChoice2, string? keyChoice3, CancellationToken cancellationToken = default)
+        {
+            TaskCompletionSource<ReservedKey> tcs = new();
+            var t = (tcs, keyChoice1, keyChoice2, keyChoice3);
+            var (added1, added2, added3) = (false, false, false);
+            string? chosen = null;
+            try
+            {
+                added1 = _reservedKeys.TryAdd(keyChoice1, t);
+                if (string.IsNullOrEmpty(keyChoice2))
+                    keyChoice2 = null;
+                else
+                    added2 = _reservedKeys.TryAdd(keyChoice2, t);
+                if (string.IsNullOrEmpty(keyChoice3))
+                    keyChoice3 = null;
+                else
+                    added3 = _reservedKeys.TryAdd(keyChoice3, t);
+                var size = Unsafe.SizeOf<SendRequestReservedKey>();
+                var a = ArrayPool<byte>.Shared.Rent(size);
+                try
+                {
+                    MemoryMarshal.AsRef<SendRequestReservedKey>(a) = new(mappedEvent.EventId, keyChoice1, keyChoice2, keyChoice3);
+                    _ = (await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false)).ContinueWith(task =>
+                    {
+                        if (task.Exception?.InnerException is AsyncException ee)
+                        {
+                            tcs.TrySetException(ee.Index switch
+                            {
+                                1 => nameof(mappedEvent),
+                                2 => nameof(keyChoice1),
+                                3 => nameof(keyChoice2),
+                                4 => nameof(keyChoice3),
+                                _ => null
+                            } is string n ? new ArgumentException(ee.Message, n) : ee);
+                        }
+                    }, TaskContinuationOptions.OnlyOnFaulted);
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(a);
+                }
+                var r = await tcs.Task.ConfigureAwait(false);
+                chosen = r.Chosen;
+                return r;
+            }
+            finally
+            {
+                if (added1 && keyChoice1 != chosen)
+                    _reservedKeys.TryRemove(keyChoice1, out _);
+                if (added2 && keyChoice2 != chosen)
+                    _reservedKeys.TryRemove(keyChoice2!, out _);
+                if (added3 && keyChoice3 != chosen)
+                    _reservedKeys.TryRemove(keyChoice3!, out _);
+            }
         }
     }
 }

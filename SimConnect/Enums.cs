@@ -2,6 +2,15 @@
 
 namespace FlyByWireless.SimConnect
 {
+    public enum GroupPriority : uint
+    {
+        Highest = 1,
+        HighestMaskable = 10000000,
+        Standard = 1900000000,
+        Default = 2000000000,
+        Lowest = 4000000000
+    }
+
     public enum RecvId
     {
         Null,

@@ -5,6 +5,22 @@ using System.Text;
 
 namespace FlyByWireless.SimConnect.Data
 {
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    public readonly struct RaceResult
+    {
+        public readonly uint NumberOfRacers;
+        public readonly Guid MissionGuid;
+        public readonly String256 PlayerName, SessionType, Aircraft, PlayerRole;
+        readonly double _TotalTime, _PenaltyTime;
+        readonly int _IsDisqualified;
+
+        public TimeSpan TotalTime => TimeSpan.FromSeconds(_TotalTime);
+
+        public TimeSpan PenaltyTime => TimeSpan.FromSeconds(_PenaltyTime);
+
+        public bool IsDisqualified => _IsDisqualified != 0;
+    }
+
     namespace Facility
     {
         [StructLayout(LayoutKind.Explicit, Pack = 1, Size = 33)]
@@ -269,10 +285,21 @@ namespace FlyByWireless.SimConnect.Data
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     public readonly struct LatLonAlt
     {
-        public readonly double Latitude, Longitude, Altitude;
+        /// <summary>
+        /// degrees
+        /// </summary>
+        public readonly double Latitude, Longitude;
+
+        /// <summary>
+        /// meters
+        /// </summary>
+        public readonly double Altitude;
 
         public LatLonAlt(double latitude, double longitude, double altitude) =>
             (Latitude, Longitude, Altitude) = (latitude, longitude, altitude);
+
+        public override string ToString() =>
+            $"({(Latitude < 0 ? 'S' : 'N')}{Math.Abs(Latitude)}, {(Longitude < 0 ? 'W' : 'E')}{Math.Abs(Longitude)}, {Altitude}m)";
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]

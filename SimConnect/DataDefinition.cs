@@ -1,21 +1,48 @@
 ﻿using System;
+using System.Reflection;
+using System.Threading.Tasks;
 
 namespace FlyByWireless.SimConnect
 {
     [AttributeUsage(AttributeTargets.Field)]
     public sealed class DataDefinitionAttribute : Attribute
     {
-        public string DatumName { get; }
+        public readonly string? DatumName, UnitsName;
 
-        public string UnitsName { get; }
+        public readonly float Epsilon;
 
-        public DataType DatumType { get; }
+        internal int DatumId;
 
-        public float Epsilon { get; }
+        public DataDefinitionAttribute(string? datumName = null, string? unitsName = null, float epsilon = 0) =>
+            (DatumName, UnitsName, Epsilon) = (datumName, unitsName, epsilon);
+    }
 
-        internal int DatumId { get; set; }
+    public sealed class DataDefinition : IAsyncDisposable
+    {
+        internal readonly uint DefineId;
 
-        public DataDefinitionAttribute(string datumName, string unitsName, DataType datumType = DataType.Float64, float epsilon = 0) =>
-            (DatumName, UnitsName, DatumType, Epsilon) = (datumName, unitsName, datumType, epsilon);
+        internal readonly (int Offset, int Size)[] Used;
+
+        public readonly Task Added;
+
+        readonly Func<ValueTask> _clear;
+
+        internal DataDefinition(uint defineId, (int Offset, int Size)[] used, Task added, Func<ValueTask> undefine) =>
+            (DefineId, Used, Added, _clear) = (defineId, used, added, undefine);
+
+        public ValueTask DisposeAsync() => _clear();
+    }
+
+    public sealed class DataDefinitionException : System.Exception
+    {
+        public FieldInfo Field;
+
+        public string Definition;
+
+        public Exception Exception;
+
+        internal DataDefinitionException(FieldInfo field, string definition, Exception exception) :
+            base($"{definition} of {field.DeclaringType?.FullName}.{field.Name} is {exception}") =>
+            (Field, Definition, Exception) = (field, definition, exception);
     }
 }
