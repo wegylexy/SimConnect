@@ -5,6 +5,7 @@ using System.Text;
 
 namespace FlyByWireless.SimConnect.Data
 {
+    [Obsolete]
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     public readonly struct RaceResult
     {

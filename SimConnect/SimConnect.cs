@@ -85,7 +85,7 @@ namespace FlyByWireless.SimConnect
 
         readonly ConcurrentDictionary<uint, PointerAction> _requests = new();
 
-        readonly ConcurrentDictionary<uint, EventHandler<int>> _eventHandlers = new();
+        readonly ConcurrentDictionary<uint, EventHandler<DataEventArgs>> _eventHandlers = new();
 
         readonly ConcurrentDictionary<string, (TaskCompletionSource<ReservedKey> Reserved, string Choice1, string? Choice2, string? Choice3)> _reservedKeys = new();
 
@@ -179,7 +179,8 @@ namespace FlyByWireless.SimConnect
                     var s = buffer.AsSpan(0, size);
                     switch (MemoryMarshal.AsRef<Recv>(s).Id)
                     {
-                        case RecvId.Null: throw new NotImplementedException();
+                        case RecvId.Null:
+                            break;
                         case RecvId.Exception:
                             {
                                 ref var r = ref MemoryMarshal.AsRef<RecvException>(s);
@@ -203,12 +204,30 @@ namespace FlyByWireless.SimConnect
                             {
                                 ref var e = ref MemoryMarshal.AsRef<RecvEvent>(s);
                                 if (_eventHandlers.TryGetValue(e.EventId, out var h))
-                                    h?.Invoke(this, e.Data);
+                                    h?.Invoke(this, new(in e));
                             }
                             break;
-                        case RecvId.EventObjectAddRemove: throw new NotImplementedException();
-                        case RecvId.EventFileName: throw new NotImplementedException();
-                        case RecvId.EventFrame: throw new NotImplementedException();
+                        case RecvId.EventObjectAddRemove:
+                            {
+                                ref var e = ref MemoryMarshal.AsRef<RecvEventObjectAddRemove>(s);
+                                if (_eventHandlers.TryGetValue(e.Event.EventId, out var h))
+                                    h?.Invoke(this, new ObjectAddRemoveEventArgs(in e));
+                            }
+                            break;
+                        case RecvId.EventFileName:
+                            {
+                                ref var e = ref MemoryMarshal.AsRef<RecvEventFileName>(s);
+                                if (_eventHandlers.TryGetValue(e.Event.EventId, out var h))
+                                    h?.Invoke(this, new FileNameEventArgs(in e));
+                            }
+                            break;
+                        case RecvId.EventFrame:
+                            {
+                                ref var e = ref MemoryMarshal.AsRef<RecvEventFrame>(s);
+                                if (_eventHandlers.TryGetValue(e.Event.EventId, out var h))
+                                    h?.Invoke(this, new FrameEventArgs(in e));
+                            }
+                            break;
                         case RecvId.SimObjectData:
                         case RecvId.SimObjectDataByType:
                         case RecvId.WeatherObservation:
@@ -236,14 +255,53 @@ namespace FlyByWireless.SimConnect
                                     t.Reserved.TrySetResult(k);
                             }
                             break;
+#pragma warning disable CS0612 // Type or member is obsolete
                         case RecvId.CustomAction: throw new NotImplementedException();
-                        case RecvId.EventWeatherMode: throw new NotImplementedException();
-                        case RecvId.EventMultiplayerServerStarted: throw new NotImplementedException();
-                        case RecvId.EventMultiplayerClientStarted: throw new NotImplementedException();
-                        case RecvId.EventMultiplayerSessionEnded: throw new NotImplementedException();
-                        case RecvId.EventRaceEnd: throw new NotImplementedException();
-                        case RecvId.EnentRaceLap: throw new NotImplementedException();
-                        default: throw new NotSupportedException();
+                        case RecvId.EventWeatherMode:
+                            {
+                                ref var e = ref MemoryMarshal.AsRef<RecvEventWeatherMode>(s);
+                                if (_eventHandlers.TryGetValue(e.Event.EventId, out var h))
+                                    h?.Invoke(this, new WeatherModeEventArgs(in e));
+                            }
+                            break;
+                        case RecvId.EventMultiplayerServerStarted:
+                            {
+                                ref var e = ref MemoryMarshal.AsRef<RecvEventMultiplayerServerStarted>(s);
+                                if (_eventHandlers.TryGetValue(e.Event.EventId, out var h))
+                                    h?.Invoke(this, new MultiplayerServerStartedEventArgs(in e));
+                            }
+                            break;
+                        case RecvId.EventMultiplayerClientStarted:
+                            {
+                                ref var e = ref MemoryMarshal.AsRef<RecvEventMultiplayerClientStarted>(s);
+                                if (_eventHandlers.TryGetValue(e.Event.EventId, out var h))
+                                    h?.Invoke(this, new MultiplayerClientStartedEventArgs(in e));
+                            }
+                            break;
+                        case RecvId.EventMultiplayerSessionEnded:
+                            {
+                                ref var e = ref MemoryMarshal.AsRef<RecvEventMultiplayerSessionEnded>(s);
+                                if (_eventHandlers.TryGetValue(e.Event.EventId, out var h))
+                                    h?.Invoke(this, new MultiplayerSessionEndedEventArgs(in e));
+                            }
+                            break;
+                        case RecvId.EventRaceEnd:
+                            {
+                                ref var e = ref MemoryMarshal.AsRef<RecvEventRaceEnd>(s);
+                                if (_eventHandlers.TryGetValue(e.Event.EventId, out var h))
+                                    h?.Invoke(this, new RaceEndEventArgs(in e));
+                            }
+                            break;
+                        case RecvId.EventRaceLap:
+                            {
+                                ref var e = ref MemoryMarshal.AsRef<RecvEventRaceLap>(s);
+                                if (_eventHandlers.TryGetValue(e.Event.EventId, out var h))
+                                    h?.Invoke(this, new RaceLapEventArgs(in e));
+                            }
+                            break;
+#pragma warning restore CS0612 // Type or member is obsolete
+                        default:
+                            throw new NotSupportedException();
                     }
                 }
                 Parse();
@@ -312,7 +370,7 @@ namespace FlyByWireless.SimConnect
             throw ee;
         }
 
-        public async ValueTask<ClientEvent> MapClientEventToSimEventAsync(uint groupId, EventHandler<int> handler, string? eventName = null, bool maskable = false, CancellationToken cancellationToken = default)
+        public async ValueTask<DataEvent> MapClientEventToSimEventAsync(uint groupId, EventHandler<DataEventArgs> handler, string? eventName = null, bool maskable = false, CancellationToken cancellationToken = default)
         {
             var id = Interlocked.Increment(ref _eventId);
             var added = _eventHandlers.TryAdd(id, handler);
@@ -367,7 +425,7 @@ namespace FlyByWireless.SimConnect
             }
         }
 
-        public async ValueTask<Task> TransmitClientEventAsync(ClientEvent mappedEvent, uint objectId, int data, uint groupId, EventFlags flags, CancellationToken cancellationToken = default)
+        public async ValueTask<Task> TransmitClientEventAsync(DataEvent mappedEvent, uint objectId, int data, uint groupId, EventFlags flags, CancellationToken cancellationToken = default)
         {
             var size = Unsafe.SizeOf<SendTransmitClientEvent>();
             var a = ArrayPool<byte>.Shared.Rent(size);
@@ -383,6 +441,30 @@ namespace FlyByWireless.SimConnect
                             3 => nameof(data),
                             4 => nameof(groupId),
                             5 => nameof(flags),
+                            _ => throw ee
+                        });
+                }, TaskContinuationOptions.OnlyOnFaulted);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(a);
+            }
+        }
+
+        public async ValueTask<Task> SetSystemEventStateAsync(DataEvent subscribedEvent, State state, CancellationToken cancellationToken = default)
+        {
+            var size = Unsafe.SizeOf<SendSetSystemEventState>();
+            var a = ArrayPool<byte>.Shared.Rent(size);
+            try
+            {
+                MemoryMarshal.AsRef<SendSetSystemEventState>(a) = new(subscribedEvent.EventId, state);
+                return (await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false)).ContinueWith(task =>
+                {
+                    if (task.Exception?.InnerException is AsyncException ee)
+                        throw new ArgumentException(ee.Message, ee.Index switch
+                        {
+                            1 => nameof(subscribedEvent),
+                            2 => nameof(state),
                             _ => throw ee
                         });
                 }, TaskContinuationOptions.OnlyOnFaulted);
@@ -823,7 +905,7 @@ namespace FlyByWireless.SimConnect
         }
         #endregion
 
-        public async ValueTask<InputEvent> MapInputEventToClientEventAsync(uint groupId, string inputDefinition, ClientEvent? downHandler = null, int downValue = 0, ClientEvent? upHandler = null, int upValue = 0, bool maskable = false, CancellationToken cancellationToken = default)
+        public async ValueTask<InputEvent> MapInputEventToClientEventAsync(uint groupId, string inputDefinition, DataEvent? downHandler = null, int downValue = 0, DataEvent? upHandler = null, int upValue = 0, bool maskable = false, CancellationToken cancellationToken = default)
         {
             uint downId = downHandler?.EventId ?? uint.MaxValue, upId = upHandler?.EventId ?? uint.MaxValue;
             var size = Unsafe.SizeOf<SendMapInputEventToClientEvent>();
@@ -934,7 +1016,7 @@ namespace FlyByWireless.SimConnect
             }
         }
 
-        public async ValueTask<ReservedKey> RequestReservedKeyAsync(ClientEvent mappedEvent, string keyChoice1, string? keyChoice2, string? keyChoice3, CancellationToken cancellationToken = default)
+        public async ValueTask<ReservedKey> RequestReservedKeyAsync(DataEvent mappedEvent, string keyChoice1, string? keyChoice2, string? keyChoice3, CancellationToken cancellationToken = default)
         {
             TaskCompletionSource<ReservedKey> tcs = new();
             var t = (tcs, keyChoice1, keyChoice2, keyChoice3);
@@ -987,6 +1069,45 @@ namespace FlyByWireless.SimConnect
                     _reservedKeys.TryRemove(keyChoice2!, out _);
                 if (added3 && keyChoice3 != chosen)
                     _reservedKeys.TryRemove(keyChoice3!, out _);
+            }
+        }
+
+        public async ValueTask<DataEvent> SubscribeToSystemEventAsync(EventHandler<DataEventArgs> handler, string eventName, CancellationToken cancellationToken = default)
+        {
+            var id = Interlocked.Increment(ref _eventId);
+            var added = _eventHandlers.TryAdd(id, handler);
+            Debug.Assert(added);
+            var size = Unsafe.SizeOf<SendSubscribeToSystemEvent>();
+            var a = ArrayPool<byte>.Shared.Rent(size);
+            try
+            {
+                MemoryMarshal.AsRef<SendSubscribeToSystemEvent>(a) = new(id, eventName);
+                return new(id, handler, (await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false)).ContinueWith(task =>
+                {
+                    if (task.Exception?.InnerException is AsyncException ee)
+                        throw new ArgumentException(ee.Message, ee.Index switch
+                        {
+                            2 => nameof(eventName),
+                            _ => throw ee
+                        });
+                }, TaskContinuationOptions.OnlyOnFaulted), async () =>
+                {
+                    var size = Unsafe.SizeOf<SendUnsubscribeToSystemEvent>();
+                    var a = ArrayPool<byte>.Shared.Rent(size);
+                    try
+                    {
+                        MemoryMarshal.AsRef<SendUnsubscribeToSystemEvent>(a) = new(id);
+                        _ = await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        ArrayPool<byte>.Shared.Return(a);
+                    }
+                });
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(a);
             }
         }
     }

@@ -19,8 +19,13 @@ Console.WriteLine($"Application Version:\t{open.ApplicationVersion}");
 Console.WriteLine($"SimConnect Version:\t{open.SimConnectVersion}");
 
 for (var i = 0u; i < 20; ++i)
-    _ = (await client.MapClientEventToSimEventAsync(i, (_, j) => { }, "Custom.Test")).Mapped
+    _ = (await client.MapClientEventToSimEventAsync(i, (_, e) => { }, "Custom.Test")).Mapped
         .ContinueWith(task => Console.Error.WriteLine(task.Exception), TaskContinuationOptions.OnlyOnFaulted);
+
+_ = (await client.SubscribeToSystemEventAsync((_, e) =>
+{
+    Console.WriteLine("1sec");
+}, "1sec")).Mapped.ContinueWith(task => Console.Error.WriteLine(task.Exception), TaskContinuationOptions.OnlyOnFaulted);
 
 {
     await using var defined = await client.DefineDataAsync<Info>();

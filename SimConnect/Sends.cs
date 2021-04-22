@@ -57,6 +57,18 @@ namespace FlyByWireless.SimConnect
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    readonly struct SendSetSystemEventState
+    {
+        readonly Send Send;
+        readonly uint EventId;
+        readonly State State;
+
+        public unsafe SendSetSystemEventState(uint eventId, State state) =>
+            (Send, EventId, State) =
+                (new(sizeof(SendSetSystemEventState), 0xF0000006), eventId, state);
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
     readonly struct SendAddClientEventToNotificationGroupAsync
     {
         readonly Send Send;
@@ -278,5 +290,28 @@ namespace FlyByWireless.SimConnect
             fixed (sbyte* b = &KeyChoice3)
                 b[string.IsNullOrEmpty(keyChoice3) ? 0 : Encoding.Default.GetBytes(keyChoice3, new Span<byte>(b, 29))] = 0;
         }
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    readonly struct SendSubscribeToSystemEvent
+    {
+        readonly Send Send;
+        readonly uint EventId;
+        readonly String256 EventName;
+
+        public unsafe SendSubscribeToSystemEvent(uint eventId, string eventName) =>
+            (Send, EventId, EventName) =
+                (new(sizeof(SendSubscribeToSystemEvent), 0xF0000017), eventId, eventName);
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    readonly struct SendUnsubscribeToSystemEvent
+    {
+        readonly Send Send;
+        readonly uint EventId;
+
+        public unsafe SendUnsubscribeToSystemEvent(uint eventId) =>
+            (Send, EventId) =
+                (new(sizeof(SendSubscribeToSystemEvent), 0xF0000018), eventId);
     }
 }

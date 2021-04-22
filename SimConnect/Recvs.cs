@@ -44,16 +44,16 @@ namespace FlyByWireless.SimConnect
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     readonly struct RecvEvent
     {
-        public const uint UnknownGroup = uint.MaxValue;
+        internal const uint UnknownGroup = uint.MaxValue;
         readonly Recv Recv;
-        public readonly uint GroupId, EventId;
+        internal readonly uint GroupId, EventId;
         public readonly int Data;
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     readonly struct RecvEventFileName
     {
-        public readonly RecvEvent Event;
+        internal readonly RecvEvent Event;
         public readonly String256 FileName;
         public readonly uint Flags;
     }
@@ -61,47 +61,52 @@ namespace FlyByWireless.SimConnect
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     readonly struct RecvEventObjectAddRemove
     {
-        public readonly RecvEvent Event;
+        internal readonly RecvEvent Event;
         public readonly SimObjectType ObjType;
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     readonly struct RecvEventFrame
     {
-        public readonly RecvEvent Event;
+        internal readonly RecvEvent Event;
         public readonly float FrameRate, SimSpeed;
     }
 
+    [Obsolete]
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     readonly struct RecvEventMultiplayerServerStarted
     {
-        public readonly RecvEvent Event;
+        internal readonly RecvEvent Event;
     }
 
+    [Obsolete]
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     readonly struct RecvEventMultiplayerClientStarted
     {
-        public readonly RecvEvent Event;
+        internal readonly RecvEvent Event;
     }
 
+    [Obsolete]
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     readonly struct RecvEventMultiplayerSessionEnded
     {
-        public readonly RecvEvent Event;
+        internal readonly RecvEvent Event;
     }
 
+    [Obsolete]
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     readonly struct RecvEventRaceEnd
     {
-        public readonly RecvEvent Event;
+        internal readonly RecvEvent Event;
         public readonly uint RacerNumber;
         public readonly RaceResult RacerData;
     }
 
+    [Obsolete]
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     readonly struct RecvEventRaceLap
     {
-        public readonly RecvEvent Event;
+        internal readonly RecvEvent Event;
         public readonly uint LapIndex;
         public readonly RaceResult RacerData;
     }
@@ -206,6 +211,7 @@ namespace FlyByWireless.SimConnect
         public readonly String256 String;
     }
 
+    [Obsolete]
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     readonly ref struct RecvCustomAction
     {
@@ -215,7 +221,7 @@ namespace FlyByWireless.SimConnect
         public readonly StringV PayLoad;
     }
 
-    [Obsolete()]
+    [Obsolete]
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     readonly struct RecvEventWeatherMode
     {

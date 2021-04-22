@@ -30,7 +30,7 @@ namespace FlyByWireless.SimConnect
         CustomAction,
         SystemState,
         ClientData,
-        EventWeatherMode,
+        [Obsolete] EventWeatherMode,
         AirportList,
         VORList,
         NDBList,
@@ -39,7 +39,7 @@ namespace FlyByWireless.SimConnect
         EventMultiplayerClientStarted,
         EventMultiplayerSessionEnded,
         EventRaceEnd,
-        EnentRaceLap
+        EventRaceLap
     }
 
     public enum DataType
