@@ -127,6 +127,7 @@ namespace FlyByWireless.SimConnect
                 (new(sizeof(SendRequestNotificationGroup), 0xF000000B), groupId, reserved, flags);
     }
 
+    #region SimObject Data
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     readonly struct SendAddToDataDefinition
     {
@@ -196,6 +197,7 @@ namespace FlyByWireless.SimConnect
                 data.CopyTo(new(p, data.Length));
         }
     }
+    #endregion
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     readonly struct SendMapInputEventToClientEvent
@@ -284,11 +286,11 @@ namespace FlyByWireless.SimConnect
             (Send, EventId) =
                 (new(sizeof(SendRequestReservedKey), 0xF0000016), eventId);
             fixed (sbyte* b = &KeyChoice1)
-                b[string.IsNullOrEmpty(keyChoice1) ? 0 : Encoding.Default.GetBytes(keyChoice1, new Span<byte>(b, 29))] = 0;
+                b[string.IsNullOrEmpty(keyChoice1) ? 0 : Encoding.ASCII.GetBytes(keyChoice1, new(b, 29))] = 0;
             fixed (sbyte* b = &KeyChoice2)
-                b[string.IsNullOrEmpty(keyChoice2) ? 0 : Encoding.Default.GetBytes(keyChoice2, new Span<byte>(b, 29))] = 0;
+                b[string.IsNullOrEmpty(keyChoice2) ? 0 : Encoding.ASCII.GetBytes(keyChoice2, new(b, 29))] = 0;
             fixed (sbyte* b = &KeyChoice3)
-                b[string.IsNullOrEmpty(keyChoice3) ? 0 : Encoding.Default.GetBytes(keyChoice3, new Span<byte>(b, 29))] = 0;
+                b[string.IsNullOrEmpty(keyChoice3) ? 0 : Encoding.ASCII.GetBytes(keyChoice3, new(b, 29))] = 0;
         }
     }
 
@@ -313,5 +315,67 @@ namespace FlyByWireless.SimConnect
         public unsafe SendUnsubscribeToSystemEvent(uint eventId) =>
             (Send, EventId) =
                 (new(sizeof(SendSubscribeToSystemEvent), 0xF0000018), eventId);
+    }
+
+    #region Weather
+    [Obsolete]
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    readonly struct SendWeatherRequestInterpolatedObservation
+    {
+        readonly Send Send;
+        readonly uint RequestId;
+        readonly float Lat, Lon, Alt;
+
+        public unsafe SendWeatherRequestInterpolatedObservation(uint requestId, float lat, float lon, float alt) =>
+            (Send, RequestId, Lat, Lon, Alt) =
+                (new(sizeof(SendWeatherRequestInterpolatedObservation), 0xF0000019), requestId, lat, lon, alt);
+    }
+
+    [Obsolete]
+    [StructLayout(LayoutKind.Explicit, Pack = 1, Size = 21)]
+    readonly struct SendWeatherRequestObservationAtStation
+    {
+        [FieldOffset(0)]
+        readonly Send Send;
+        [FieldOffset(12)]
+        readonly uint RequestId;
+        [FieldOffset(16)]
+        readonly sbyte Icao;
+
+        public unsafe SendWeatherRequestObservationAtStation(uint requestId, string icao, out int size)
+        {
+            (Send, RequestId) =
+                (new(sizeof(SendWeatherRequestInterpolatedObservation), 0xF000001A), requestId);
+            fixed (sbyte* b = &Icao)
+                b[size = Encoding.ASCII.GetBytes(icao, new(b, 4))] = 0;
+            size += 17;
+        }
+    }
+
+    [Obsolete]
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    readonly struct SendWeatherRequestObservationAtNearestStation
+    {
+        readonly Send Send;
+        readonly uint RequestId;
+        readonly float Lat, Lon;
+
+        public unsafe SendWeatherRequestObservationAtNearestStation(uint requestId, float lat, float lon) =>
+            (Send, RequestId, Lat, Lon) =
+                (new(sizeof(SendWeatherRequestObservationAtNearestStation), 0xF000001B), requestId, lat, lon);
+    }
+    #endregion
+
+    [Obsolete]
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    readonly struct SendCameraSetRelative6DOF
+    {
+        readonly Send Send;
+        readonly float DeltaX, DeltaY, DeltaZ,
+            PitchDeg, BankDeg, HeadingDeg;
+
+        public unsafe SendCameraSetRelative6DOF(float deltaX, float deltaY, float deltaZ, float pitchDeg, float bankDeg, float headingDeg) =>
+            (Send, DeltaX, DeltaY, DeltaZ, PitchDeg, BankDeg, HeadingDeg) =
+                (new(sizeof(SendCameraSetRelative6DOF), 0xF0000030), deltaX, deltaY, deltaZ, pitchDeg, bankDeg, headingDeg);
     }
 }

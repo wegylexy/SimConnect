@@ -2,6 +2,7 @@
 using System;
 using System.ComponentModel.DataAnnotations;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace FlyByWireless.SimConnect
 {
@@ -130,6 +131,7 @@ namespace FlyByWireless.SimConnect
         }
     }
 
+    [Obsolete]
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     readonly ref struct RecvWeatherObservation
     {
@@ -138,6 +140,7 @@ namespace FlyByWireless.SimConnect
         public readonly StringV Metar;
     }
 
+    [Obsolete]
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     unsafe readonly ref struct RecvCloudState
     {
@@ -182,8 +185,11 @@ namespace FlyByWireless.SimConnect
             {
                 fixed (sbyte* b = &_ChoiceReserved)
                 {
-                    b[29] = 0;
-                    return new(b);
+                    int length = 0;
+                    while (length < 30)
+                        if (b[length++] == 0)
+                            break;
+                    return new(b, 0, length, Encoding.ASCII);
                 }
             }
         }
@@ -195,8 +201,11 @@ namespace FlyByWireless.SimConnect
             {
                 fixed (sbyte* b = &_ReservedKey)
                 {
-                    b[49] = 0;
-                    return new(b);
+                    int length = 0;
+                    while (length < 50)
+                        if (b[length++] == 0)
+                            break;
+                    return new(b, 0, length, Encoding.ASCII);
                 }
             }
         }

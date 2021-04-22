@@ -23,8 +23,8 @@ namespace FlyByWireless.SimConnect
         EventFrame,
         SimObjectData,
         SimObjectDataByType,
-        WeatherObservation,
-        CloudState,
+        [Obsolete] WeatherObservation,
+        [Obsolete] CloudState,
         AssignedObjectId,
         ReservedKey,
         CustomAction,
@@ -35,11 +35,11 @@ namespace FlyByWireless.SimConnect
         VORList,
         NDBList,
         WaypointList,
-        EventMultiplayerServerStarted,
-        EventMultiplayerClientStarted,
-        EventMultiplayerSessionEnded,
-        EventRaceEnd,
-        EventRaceLap
+        [Obsolete] EventMultiplayerServerStarted,
+        [Obsolete] EventMultiplayerClientStarted,
+        [Obsolete] EventMultiplayerSessionEnded,
+        [Obsolete] EventRaceEnd,
+        [Obsolete] EventRaceLap
     }
 
     public enum DataType

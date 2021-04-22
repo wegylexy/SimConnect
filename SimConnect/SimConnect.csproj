@@ -9,6 +9,7 @@
     <Product>Purely managed SimConnect client</Product>
     <Copyright>(C) 2021 WONG Tin Chi Timothy. All rights reserved.</Copyright>
     <Nullable>enable</Nullable>
+    <Version>1.0.0-alpha</Version>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">

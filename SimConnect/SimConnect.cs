@@ -230,14 +230,16 @@ namespace FlyByWireless.SimConnect
                             break;
                         case RecvId.SimObjectData:
                         case RecvId.SimObjectDataByType:
-                        case RecvId.WeatherObservation:
-                        case RecvId.CloudState:
                         case RecvId.SystemState:
                         case RecvId.ClientData:
                         case RecvId.AirportList:
                         case RecvId.VORList:
                         case RecvId.NDBList:
                         case RecvId.WaypointList:
+#pragma warning disable CS0612 // Type or member is obsolete
+                        case RecvId.WeatherObservation:
+                        case RecvId.CloudState:
+#pragma warning restore CS0612 // Type or member is obsolete
                             unsafe
                             {
                                 fixed (void* p = s)
@@ -877,7 +879,7 @@ namespace FlyByWireless.SimConnect
             {
                 MemoryMarshal.AsRef<SendSetDataOnSimObject<T>>(a) = new(define.DefineId, objectId, data);
             }
-            catch
+            finally
             {
                 ArrayPool<byte>.Shared.Return(a);
             }
@@ -1110,5 +1112,171 @@ namespace FlyByWireless.SimConnect
                 ArrayPool<byte>.Shared.Return(a);
             }
         }
+
+        #region Weather
+        [Obsolete]
+        public async ValueTask<string> WeatherRequestInterpolatedObservationAsync(float lat, float lon, float alt /* feet */, CancellationToken cancellationToken)
+        {
+            var id = Interlocked.Increment(ref _requestId);
+            try
+            {
+                TaskCompletionSource<string> tcs = new();
+                unsafe void R() => _requests.TryAdd(id, data => tcs.TrySetResult(((RecvWeatherObservation*)data)->Metar));
+                R();
+                var size = Unsafe.SizeOf<SendWeatherRequestInterpolatedObservation>();
+                var a = ArrayPool<byte>.Shared.Rent(size);
+                try
+                {
+                    MemoryMarshal.AsRef<SendWeatherRequestInterpolatedObservation>(a) = new(id, lat, lon, alt);
+                    _ = (await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false)).ContinueWith(task =>
+                    {
+                        if (task.Exception?.InnerException is AsyncException ee)
+                        {
+                            tcs.TrySetException(ee.Index switch
+                            {
+                                2 => nameof(lat),
+                                3 => nameof(lon),
+                                4 => nameof(alt),
+                                _ => null
+                            } is string n ? new ArgumentException(ee.Message, n) : ee);
+                        }
+                    }, TaskContinuationOptions.OnlyOnFaulted);
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(a);
+                }
+                return await tcs.Task.ConfigureAwait(false);
+            }
+            finally
+            {
+                _requests.TryRemove(id, out _);
+            }
+        }
+
+        [Obsolete]
+        public async ValueTask<string> WeatherRequestObservationAtStationAsync(string icao, CancellationToken cancellationToken)
+        {
+            var id = Interlocked.Increment(ref _requestId);
+            try
+            {
+                TaskCompletionSource<string> tcs = new();
+                unsafe void R() => _requests.TryAdd(id, data => tcs.TrySetResult(((RecvWeatherObservation*)data)->Metar));
+                R();
+                var size = Unsafe.SizeOf<SendWeatherRequestObservationAtStation>();
+                var a = ArrayPool<byte>.Shared.Rent(size);
+                try
+                {
+                    MemoryMarshal.AsRef<SendWeatherRequestObservationAtStation>(a) = new(id, icao, out size);
+                    _ = (await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false)).ContinueWith(task =>
+                    {
+                        if (task.Exception?.InnerException is AsyncException ee)
+                        {
+                            tcs.TrySetException(ee.Index switch
+                            {
+                                2 => nameof(icao),
+                                _ => null
+                            } is string n ? new ArgumentException(ee.Message, n) : ee);
+                        }
+                    }, TaskContinuationOptions.OnlyOnFaulted);
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(a);
+                }
+                return await tcs.Task.ConfigureAwait(false);
+            }
+            finally
+            {
+                _requests.TryRemove(id, out _);
+            }
+        }
+
+        [Obsolete]
+        public async ValueTask<string> WeatherRequestObservationAtNearestStationAsync(float lat, float lon, CancellationToken cancellationToken)
+        {
+            var id = Interlocked.Increment(ref _requestId);
+            try
+            {
+                TaskCompletionSource<string> tcs = new();
+                unsafe void R() => _requests.TryAdd(id, data => tcs.TrySetResult(((RecvWeatherObservation*)data)->Metar));
+                R();
+                var size = Unsafe.SizeOf<SendWeatherRequestObservationAtNearestStation>();
+                var a = ArrayPool<byte>.Shared.Rent(size);
+                try
+                {
+                    MemoryMarshal.AsRef<SendWeatherRequestObservationAtNearestStation>(a) = new(id, lat, lon);
+                    _ = (await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false)).ContinueWith(task =>
+                    {
+                        if (task.Exception?.InnerException is AsyncException ee)
+                        {
+                            tcs.TrySetException(ee.Index switch
+                            {
+                                2 => nameof(lat),
+                                3 => nameof(lon),
+                                _ => null
+                            } is string n ? new ArgumentException(ee.Message, n) : ee);
+                        }
+                    }, TaskContinuationOptions.OnlyOnFaulted);
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(a);
+                }
+                return await tcs.Task.ConfigureAwait(false);
+            }
+            finally
+            {
+                _requests.TryRemove(id, out _);
+            }
+        }
+
+        // TODO: other weather methods
+        #endregion
+
+        // TODO: AI methods
+
+        // TODO: mission action methods
+
+        [Obsolete]
+        public async ValueTask<Task> CameraSetRelative6DOFAsync(float deltaX, float deltaY, float deltaZ, float pitchDeg, float bankDeg, float headingDeg, CancellationToken cancellationToken = default)
+        {
+            var size = Unsafe.SizeOf<SendCameraSetRelative6DOF>();
+            var a = ArrayPool<byte>.Shared.Rent(size);
+            try
+            {
+                MemoryMarshal.AsRef<SendCameraSetRelative6DOF>(a) = new(deltaX, deltaY, deltaZ, pitchDeg, bankDeg, headingDeg);
+                return (await WriteAsync(a.AsMemory(0, size), cancellationToken).ConfigureAwait(false)).ContinueWith(task =>
+                {
+                    if (task.Exception?.InnerException is AsyncException ee)
+                        throw new ArgumentException(ee.Message, ee.Index switch
+                        {
+                            1 => nameof(deltaX),
+                            2 => nameof(deltaY),
+                            3 => nameof(deltaZ),
+                            4 => nameof(pitchDeg),
+                            5 => nameof(bankDeg),
+                            6 => nameof(headingDeg),
+                            _ => throw ee
+                        });
+                }, TaskContinuationOptions.OnlyOnFaulted);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(a);
+            }
+        }
+
+        // TODO: menu methods
+
+        // TODO: system state methods
+
+        // TODO: client data methods
+
+        // TODO: flight plan methods
+
+        // TODO: text method
+
+        // TODO: facilities methods
     }
 }
