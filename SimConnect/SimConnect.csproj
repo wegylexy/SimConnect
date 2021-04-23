@@ -9,7 +9,10 @@
     <Product>Purely managed SimConnect client</Product>
     <Copyright>(C) 2021 WONG Tin Chi Timothy. All rights reserved.</Copyright>
     <Nullable>enable</Nullable>
-    <Version>1.0.0-alpha</Version>
+    <Version>1.0.1-alpha</Version>
+    <RepositoryUrl>https://github.com/wegylexy/simconnect</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
@@ -29,6 +32,13 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\LICENSE">
+      <Pack>True</Pack>
+      <PackagePath></PackagePath>
+    </None>
   </ItemGroup>
 
 </Project>

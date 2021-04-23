@@ -185,7 +185,7 @@ namespace FlyByWireless.SimConnect
             {
                 fixed (sbyte* b = &_ChoiceReserved)
                 {
-                    int length = 0;
+                    var length = 0;
                     while (length < 30)
                         if (b[length++] == 0)
                             break;
@@ -201,10 +201,9 @@ namespace FlyByWireless.SimConnect
             {
                 fixed (sbyte* b = &_ReservedKey)
                 {
-                    int length = 0;
-                    while (length < 50)
-                        if (b[length++] == 0)
-                            break;
+                    var length = 0;
+                    while (length < 50 && b[length] != 0)
+                        ++length;
                     return new(b, 0, length, Encoding.ASCII);
                 }
             }

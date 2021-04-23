@@ -9,11 +9,19 @@
     <Company>Timmy Net Net Company</Company>
     <Product>Test for purely managed SimConnect client</Product>
     <Copyright>(C) 2021 WONG Tin Chi Timothy. All rights reserved.</Copyright>
-    <Version>1.0.0-alpha</Version>
+    <Version>1.0.1-alpha</Version>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\SimConnect\SimConnect.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\LICENSE">
+      <Pack>True</Pack>
+      <PackagePath></PackagePath>
+    </None>
   </ItemGroup>
 
 </Project>

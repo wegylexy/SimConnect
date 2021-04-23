@@ -59,13 +59,6 @@ namespace FlyByWireless.SimConnect
             new(2, new(0, 0, 60905, 0)) // RTM
         });
 
-        static void WriteFixedString(MemoryStream stream, string value, int width)
-        {
-            var buffer = stream.GetBuffer().AsSpan((int)stream.Position, width);
-            buffer[(string.IsNullOrEmpty(value) ? 0 : Encoding.UTF8.GetBytes(value, buffer))..].Clear();
-            stream.Position += width;
-        }
-
         Stream ClientStream { get; } =
             new NamedPipeClientStream(".", @"Microsoft Flight Simulator\SimConnect", PipeDirection.InOut, PipeOptions.Asynchronous);
 
