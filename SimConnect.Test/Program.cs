@@ -64,6 +64,14 @@ struct Info
     [DataDefinition(unitsName: "meters")]
     public double Ground_Altitude;
 
+    public readonly BOOL Com_Recieve_All;
+
+    [DataDefinition("COM TRANSMIT:1")]
+    public readonly BOOL Com1Tx;
+
+    [DataDefinition("COM TRANSMIT:2")]
+    public readonly BOOL Com2Tx;
+
     [DataDefinition("COM ACTIVE FREQUENCY:1", "kHz")]
     public int ComActiveFrequency1_kHz;
 

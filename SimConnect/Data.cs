@@ -1,5 +1,6 @@
 ﻿using System;
 using System.ComponentModel.DataAnnotations;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -312,11 +313,26 @@ namespace FlyByWireless.SimConnect.Data
             (X, Y, Z) = (x, y, z);
     }
 
+    [DebuggerDisplay("{Value}")]
+    [StructLayout(LayoutKind.Sequential, Size = sizeof(int))]
+    public readonly struct BOOL
+    {
+        [DebuggerBrowsable(DebuggerBrowsableState.Never)]
+        public readonly bool Value;
+
+        public BOOL(bool value) => Value = value;
+
+        public static implicit operator bool(BOOL boolean) => boolean.Value;
+
+        public static implicit operator BOOL(bool value) => new(value);
+
+        public override string ToString() => ((bool)this).ToString();
+    }
+
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     public readonly struct BCO16
     {
         public const string UnitsName = nameof(BCO16);
-
         public readonly int Data;
 
         public BCO16(int value) => Data =
@@ -349,7 +365,7 @@ namespace FlyByWireless.SimConnect.Data
             Data = (d1 << 12) | (d2 << 8) | (d3 << 4) | d4;
         }
 
-        public override string ToString() => $"1{Data >> 8:X2}.{Data & 0xFF:X2}MHz";
+        public override string ToString() => $"1{Data >> 8:X2}.{Data & 0xFF:X2} MHz";
 
         public int ToKHz()
         {

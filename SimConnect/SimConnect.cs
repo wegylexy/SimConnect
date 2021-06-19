@@ -571,6 +571,7 @@ namespace FlyByWireless.SimConnect
                     {
                         var (t, s) = f.FieldType.Name switch
                         {
+                            nameof(BOOL) => (DataType.Int32, sizeof(int)),
                             nameof(Int32) => (DataType.Int32, sizeof(int)),
                             nameof(Int64) => (DataType.Int64, sizeof(long)),
                             nameof(Single) => (DataType.Float32, sizeof(float)),
