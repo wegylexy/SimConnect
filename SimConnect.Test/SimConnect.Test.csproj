@@ -9,8 +9,10 @@
     <Company>Timmy Net Net Company</Company>
     <Product>Test for purely managed SimConnect client</Product>
     <Copyright>(C) 2021 WONG Tin Chi Timothy. All rights reserved.</Copyright>
-    <Version>1.0.1-alpha</Version>
+    <Version>1.0.2-alpha</Version>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <RepositoryUrl>https://github.com/wegylexy/SimConnect</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 
   <ItemGroup>

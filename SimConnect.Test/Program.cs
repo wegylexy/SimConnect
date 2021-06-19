@@ -63,4 +63,16 @@ struct Info
 
     [DataDefinition(unitsName: "meters")]
     public double Ground_Altitude;
+
+    [DataDefinition("COM ACTIVE FREQUENCY:1", "kHz")]
+    public int ComActiveFrequency1_kHz;
+
+    [DataDefinition("COM ACTIVE FREQUENCY:1", FrequencyBCD16.UnitsName)]
+    public FrequencyBCD16 ComActiveFrequency1_bcd16;
+
+    [DataDefinition("TRANSPONDER CODE:1")]
+    public int TransponderCode1_dco;
+
+    [DataDefinition("TRANSPONDER CODE:1", BCO16.UnitsName)]
+    public BCO16 TransponderCode1_bco16;
 }

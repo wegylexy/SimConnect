@@ -311,4 +311,60 @@ namespace FlyByWireless.SimConnect.Data
         public XYZ(double x, double y, double z) =>
             (X, Y, Z) = (x, y, z);
     }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    public readonly struct BCO16
+    {
+        public const string UnitsName = nameof(BCO16);
+
+        public readonly int Data;
+
+        public BCO16(int value) => Data =
+            (value & 0b111) |
+            ((value & 0b111_000) << 1) |
+            ((value & 0b111_000_000) << 2) |
+            ((value & 0b111_000_000_000) << 3);
+
+        public override string ToString() => Data.ToString("X4");
+
+        public static implicit operator int(BCO16 bco16) =>
+            (bco16.Data & 0x7) |
+            ((bco16.Data & 0x70) >> 1) |
+            ((bco16.Data & 0x700) >> 2) |
+            ((bco16.Data & 0x7000) >> 3);
+
+        public static implicit operator BCO16(int value) => new(value);
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    public readonly struct FrequencyBCD16
+    {
+        public const string UnitsName = "Frequency BCD16";
+
+        public readonly int Data;
+
+        FrequencyBCD16(int kHz)
+        {
+            _ = Math.DivRem(Math.DivRem(Math.DivRem(Math.DivRem(kHz / 10, 10, out var d4), 10, out var d3), 10, out var d2), 10, out var d1);
+            Data = (d1 << 12) | (d2 << 8) | (d3 << 4) | d4;
+        }
+
+        public override string ToString() => $"1{Data >> 8:X2}.{Data & 0xFF:X2}MHz";
+
+        public int ToKHz()
+        {
+            var d4 = Data & 0xF;
+            return (d4 is 2 or 7 ? 5 : 0) +
+                d4 * 10 +
+                ((Data & 0xF0) >> 4) * 100 |
+                ((Data & 0xF00) >> 8) * 1000 |
+                ((Data & 0xF000) >> 12) * 10000;
+        }
+
+        public int ToHz() => ToKHz() * 1000;
+
+        public static FrequencyBCD16 FromKHz(int kHz) => new(kHz);
+
+        public static FrequencyBCD16 FromHz(int Hz) => new(Hz / 1000);
+    }
 }

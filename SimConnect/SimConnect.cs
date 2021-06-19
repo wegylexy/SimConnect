@@ -12,7 +12,6 @@ using System.IO.Pipes;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -586,6 +585,8 @@ namespace FlyByWireless.SimConnect
                             nameof(Waypoint) when d.UnitsName is null => (DataType.Waypoint, sizeof(Waypoint)),
                             nameof(LatLonAlt) when d.UnitsName is null => (DataType.LatLonAlt, sizeof(LatLonAlt)),
                             nameof(XYZ) when d.UnitsName is null => (DataType.XYZ, sizeof(XYZ)),
+                            nameof(BCO16) when d.UnitsName is BCO16.UnitsName => (DataType.Int32, sizeof(BCO16)),
+                            nameof(FrequencyBCD16) when d.UnitsName is FrequencyBCD16.UnitsName => (DataType.Int32, sizeof(FrequencyBCD16)),
                             _ => throw new NotSupportedException("Datum type and/or units name mismatch."),
                         };
                         used[d.DatumId = datumId] = (offset, s);
