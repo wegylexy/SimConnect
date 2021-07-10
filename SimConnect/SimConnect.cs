@@ -58,8 +58,10 @@ namespace FlyByWireless.SimConnect
             new(2, new(0, 0, 60905, 0)) // RTM
         });
 
-        Stream ClientStream { get; } =
+        static Stream CreateClientStream() =>
             new NamedPipeClientStream(".", @"Microsoft Flight Simulator\SimConnect", PipeDirection.InOut, PipeOptions.Asynchronous);
+
+        Stream ClientStream { get; set; } = null!;
 
         CancellationTokenSource? _quit;
 
@@ -320,11 +322,12 @@ namespace FlyByWireless.SimConnect
         {
             using (_quit) { }
             var lts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, (_quit = new()).Token);
-            await ((NamedPipeClientStream)ClientStream).ConnectAsync(lts.Token).ConfigureAwait(false);
-            ExternalException ee = null!;
+            AsyncException ee = null!;
             int size = Unsafe.SizeOf<SendOpen>();
             foreach (var protocol in _protocols)
             {
+                using (ClientStream) { }
+                await ((NamedPipeClientStream)(ClientStream = CreateClientStream())).ConnectAsync(lts.Token).ConfigureAwait(false);
                 _protocol = protocol.ProtocolVersion;
                 _open = new();
                 var opening = _open.Task;
@@ -345,6 +348,8 @@ namespace FlyByWireless.SimConnect
                 try
                 {
                     _ = await Task.WhenAny(opening, fail).ConfigureAwait(false);
+                    if (fail.IsFaulted)
+                        throw fail.Exception!.InnerException!;
                     var open = opening.Result;
                     _open = null;
                     _run = Task.Factory.StartNew(async () =>
@@ -356,7 +361,7 @@ namespace FlyByWireless.SimConnect
                     }, TaskCreationOptions.LongRunning);
                     return open;
                 }
-                catch (ExternalException ex) when (ex.ErrorCode == (int)Exception.VersionMismatch)
+                catch (AsyncException ex) when (ex.HResult == (int)Exception.VersionMismatch)
                 {
                     ee = ex;
                 }
