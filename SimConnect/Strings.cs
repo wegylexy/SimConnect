@@ -12,7 +12,7 @@ namespace FlyByWireless.SimConnect
         public String8(string? value)
         {
             fixed (sbyte* b = &_first)
-                b[string.IsNullOrEmpty(value) ? 0 : Encoding.ASCII.GetBytes(value, new Span<byte>(b, 7))] = 0;
+                b[string.IsNullOrEmpty(value) ? 0 : Encoding.Latin1.GetBytes(value, new Span<byte>(b, 7))] = 0;
         }
 
         public static implicit operator String8(string? value) => new(value);
@@ -26,7 +26,7 @@ namespace FlyByWireless.SimConnect
                 var length = 0;
                 while (length < 8 && b[length] != 0)
                     ++length;
-                return new(b, 0, length, Encoding.ASCII);
+                return new(b, 0, length, Encoding.Latin1);
             }
         }
     }
@@ -39,7 +39,7 @@ namespace FlyByWireless.SimConnect
         public String32(string? value)
         {
             fixed (sbyte* b = &_first)
-                b[string.IsNullOrEmpty(value) ? 0 : Encoding.ASCII.GetBytes(value, new Span<byte>(b, 31))] = 0;
+                b[string.IsNullOrEmpty(value) ? 0 : Encoding.Latin1.GetBytes(value, new Span<byte>(b, 31))] = 0;
         }
 
         public static implicit operator String32(string? value) => new(value);
@@ -53,7 +53,7 @@ namespace FlyByWireless.SimConnect
                 var length = 0;
                 while (length < 32 && b[length] != 0)
                     ++length;
-                return new(b, 0, length, Encoding.ASCII);
+                return new(b, 0, length, Encoding.Latin1);
             }
         }
     }
@@ -66,7 +66,7 @@ namespace FlyByWireless.SimConnect
         public String64(string? value)
         {
             fixed (sbyte* b = &_first)
-                b[string.IsNullOrEmpty(value) ? 0 : Encoding.ASCII.GetBytes(value, new Span<byte>(b, 63))] = 0;
+                b[string.IsNullOrEmpty(value) ? 0 : Encoding.Latin1.GetBytes(value, new Span<byte>(b, 63))] = 0;
         }
 
         public static implicit operator String64(string? value) => new(value);
@@ -80,7 +80,7 @@ namespace FlyByWireless.SimConnect
                 var length = 0;
                 while (length < 64 && b[length] != 0)
                     ++length;
-                return new(b, 0, length, Encoding.ASCII);
+                return new(b, 0, length, Encoding.Latin1);
             }
         }
     }
@@ -93,7 +93,7 @@ namespace FlyByWireless.SimConnect
         public String128(string? value)
         {
             fixed (sbyte* b = &_first)
-                b[string.IsNullOrEmpty(value) ? 0 : Encoding.ASCII.GetBytes(value, new Span<byte>(b, 127))] = 0;
+                b[string.IsNullOrEmpty(value) ? 0 : Encoding.Latin1.GetBytes(value, new Span<byte>(b, 127))] = 0;
         }
 
         public static implicit operator String128(string? value) => new(value);
@@ -107,7 +107,7 @@ namespace FlyByWireless.SimConnect
                 var length = 0;
                 while (length < 128 && b[length] != 0)
                     ++length;
-                return new(b, 0, length, Encoding.ASCII);
+                return new(b, 0, length, Encoding.Latin1);
             }
         }
     }
@@ -120,7 +120,7 @@ namespace FlyByWireless.SimConnect
         public String256(string? value)
         {
             fixed (sbyte* b = &_first)
-                b[string.IsNullOrEmpty(value) ? 0 : Encoding.ASCII.GetBytes(value, new Span<byte>(b, 255))] = 0;
+                b[string.IsNullOrEmpty(value) ? 0 : Encoding.Latin1.GetBytes(value, new Span<byte>(b, 255))] = 0;
         }
 
         public static implicit operator String256(string? value) => new(value);
@@ -134,7 +134,7 @@ namespace FlyByWireless.SimConnect
                 var length = 0;
                 while (length < 256 && b[length] != 0)
                     ++length;
-                return new(b, 0, length, Encoding.ASCII);
+                return new(b, 0, length, Encoding.Latin1);
             }
         }
     }
@@ -147,7 +147,7 @@ namespace FlyByWireless.SimConnect
         public String260(string? value)
         {
             fixed (sbyte* b = &_first)
-                b[string.IsNullOrEmpty(value) ? 0 : Encoding.ASCII.GetBytes(value, new Span<byte>(b, 259))] = 0;
+                b[string.IsNullOrEmpty(value) ? 0 : Encoding.Latin1.GetBytes(value, new Span<byte>(b, 259))] = 0;
         }
 
         public static implicit operator String260(string? value) => new(value);
@@ -161,7 +161,7 @@ namespace FlyByWireless.SimConnect
                 var length = 0;
                 while (length < 260 && b[length] != 0)
                     ++length;
-                return new(b, 0, length, Encoding.ASCII);
+                return new(b, 0, length, Encoding.Latin1);
             }
         }
     }
@@ -180,7 +180,7 @@ namespace FlyByWireless.SimConnect
                 var length = 0;
                 while (b[length] != 0)
                     ++length;
-                return new(b, 0, length, Encoding.ASCII);
+                return new(b, 0, length, Encoding.Latin1);
             }
         }
     }

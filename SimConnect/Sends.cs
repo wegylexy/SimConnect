@@ -286,11 +286,11 @@ namespace FlyByWireless.SimConnect
             (Send, EventId) =
                 (new(sizeof(SendRequestReservedKey), 0xF0000016), eventId);
             fixed (sbyte* b = &KeyChoice1)
-                b[string.IsNullOrEmpty(keyChoice1) ? 0 : Encoding.ASCII.GetBytes(keyChoice1, new(b, 29))] = 0;
+                b[string.IsNullOrEmpty(keyChoice1) ? 0 : Encoding.Latin1.GetBytes(keyChoice1, new(b, 29))] = 0;
             fixed (sbyte* b = &KeyChoice2)
-                b[string.IsNullOrEmpty(keyChoice2) ? 0 : Encoding.ASCII.GetBytes(keyChoice2, new(b, 29))] = 0;
+                b[string.IsNullOrEmpty(keyChoice2) ? 0 : Encoding.Latin1.GetBytes(keyChoice2, new(b, 29))] = 0;
             fixed (sbyte* b = &KeyChoice3)
-                b[string.IsNullOrEmpty(keyChoice3) ? 0 : Encoding.ASCII.GetBytes(keyChoice3, new(b, 29))] = 0;
+                b[string.IsNullOrEmpty(keyChoice3) ? 0 : Encoding.Latin1.GetBytes(keyChoice3, new(b, 29))] = 0;
         }
     }
 
@@ -347,7 +347,7 @@ namespace FlyByWireless.SimConnect
             (Send, RequestId) =
                 (new(sizeof(SendWeatherRequestInterpolatedObservation), 0xF000001A), requestId);
             fixed (sbyte* b = &Icao)
-                b[size = Encoding.ASCII.GetBytes(icao, new(b, 4))] = 0;
+                b[size = Encoding.Latin1.GetBytes(icao, new(b, 4))] = 0;
             size += 17;
         }
     }

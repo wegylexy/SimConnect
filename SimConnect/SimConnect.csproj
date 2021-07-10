@@ -9,7 +9,7 @@
     <Product>Purely managed SimConnect client</Product>
     <Copyright>(C) 2021 WONG Tin Chi Timothy. All rights reserved.</Copyright>
     <Nullable>enable</Nullable>
-    <Version>1.0.4-alpha</Version>
+    <Version>1.0.5-alpha</Version>
     <RepositoryUrl>https://github.com/wegylexy/SimConnect</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>

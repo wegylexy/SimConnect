@@ -189,7 +189,7 @@ namespace FlyByWireless.SimConnect
                     while (length < 30)
                         if (b[length++] == 0)
                             break;
-                    return new(b, 0, length, Encoding.ASCII);
+                    return new(b, 0, length, Encoding.Latin1);
                 }
             }
         }
@@ -204,7 +204,7 @@ namespace FlyByWireless.SimConnect
                     var length = 0;
                     while (length < 50 && b[length] != 0)
                         ++length;
-                    return new(b, 0, length, Encoding.ASCII);
+                    return new(b, 0, length, Encoding.Latin1);
                 }
             }
         }
