@@ -1,29 +1,30 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <TargetFramework>net5.0</TargetFramework>
-    <AssemblyName>FlyByWireless.SimConnect.Test</AssemblyName>
-    <RootNamespace>FlyByWireless.SimConnect.Test</RootNamespace>
-    <Authors>WONG Tin Chi Timothy</Authors>
-    <Company>Timmy Net Net Company</Company>
-    <Product>Test for purely managed SimConnect client</Product>
-    <Copyright>(C) 2021 WONG Tin Chi Timothy. All rights reserved.</Copyright>
-    <Version>1.0.5-alpha</Version>
-    <PackageLicenseFile>LICENSE</PackageLicenseFile>
-    <RepositoryUrl>https://github.com/wegylexy/SimConnect</RepositoryUrl>
-    <RepositoryType>git</RepositoryType>
-  </PropertyGroup>
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net6.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<AssemblyName>FlyByWireless.SimConnect.Test</AssemblyName>
+		<RootNamespace>FlyByWireless.SimConnect.Test</RootNamespace>
+		<Authors>WONG Tin Chi Timothy</Authors>
+		<Company>Timmy Net Net Company</Company>
+		<Product>Test for purely managed SimConnect client</Product>
+		<Copyright>(C) 2021-2022 WONG Tin Chi Timothy. All rights reserved.</Copyright>
+		<Version>1.0.7-alpha</Version>
+		<PackageLicenseFile>LICENSE</PackageLicenseFile>
+		<RepositoryUrl>https://github.com/wegylexy/SimConnect</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+	</PropertyGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\SimConnect\SimConnect.csproj" />
-  </ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\SimConnect\SimConnect.csproj" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <None Include="..\LICENSE">
-      <Pack>True</Pack>
-      <PackagePath></PackagePath>
-    </None>
-  </ItemGroup>
+	<ItemGroup>
+		<None Include="..\LICENSE">
+			<Pack>True</Pack>
+			<PackagePath></PackagePath>
+		</None>
+	</ItemGroup>
 
 </Project>

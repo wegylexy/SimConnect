@@ -1,48 +1,56 @@
-﻿using System;
-using System.Reflection;
-using System.Threading.Tasks;
+﻿using System.Reflection;
 
-namespace FlyByWireless.SimConnect
+namespace FlyByWireless.SimConnect;
+
+[AttributeUsage(AttributeTargets.Field)]
+public sealed class DataDefinitionAttribute : Attribute
 {
-    [AttributeUsage(AttributeTargets.Field)]
-    public sealed class DataDefinitionAttribute : Attribute
-    {
-        public readonly string? DatumName, UnitsName;
+    public readonly string? DatumName, UnitsName;
 
-        public readonly float Epsilon;
+    public readonly float Epsilon;
 
-        internal int DatumId;
+    internal int DatumId;
 
-        public DataDefinitionAttribute(string? datumName = null, string? unitsName = null, float epsilon = 0) =>
-            (DatumName, UnitsName, Epsilon) = (datumName, unitsName, epsilon);
-    }
+    public DataDefinitionAttribute(string? datumName = null, string? unitsName = null, float epsilon = 0) =>
+        (DatumName, UnitsName, Epsilon) = (datumName, unitsName, epsilon);
+}
 
-    public sealed class DataDefinition : IAsyncDisposable
-    {
-        internal readonly uint DefineId;
+[AttributeUsage(AttributeTargets.Field)]
+public sealed class ClientDataDefinitionAttribute : Attribute
+{
+    public readonly float Epsilon;
 
-        internal readonly (int Offset, int Size)[] Used;
+    internal int DatumId;
 
-        public readonly Task Added;
+    public ClientDataDefinitionAttribute(float epsilon = 0) =>
+        Epsilon = epsilon;
+}
 
-        readonly Func<ValueTask> _clear;
+public sealed class DataDefinition : IAsyncDisposable
+{
+    internal readonly uint DefineId;
 
-        internal DataDefinition(uint defineId, (int Offset, int Size)[] used, Task added, Func<ValueTask> undefine) =>
-            (DefineId, Used, Added, _clear) = (defineId, used, added, undefine);
+    internal readonly (int Offset, int Size)[] Used;
 
-        public ValueTask DisposeAsync() => _clear();
-    }
+    public readonly Task Added;
 
-    public sealed class DataDefinitionException : System.Exception
-    {
-        public FieldInfo Field;
+    readonly Func<ValueTask> _clear;
 
-        public string Definition;
+    internal DataDefinition(uint defineId, (int Offset, int Size)[] used, Task added, Func<ValueTask> undefine) =>
+        (DefineId, Used, Added, _clear) = (defineId, used, added, undefine);
 
-        public Exception Exception;
+    public ValueTask DisposeAsync() => _clear();
+}
 
-        internal DataDefinitionException(FieldInfo field, string definition, Exception exception) :
-            base($"{definition} of {field.DeclaringType?.FullName}.{field.Name} is {exception}") =>
-            (Field, Definition, Exception) = (field, definition, exception);
-    }
+public sealed class DataDefinitionException : System.Exception
+{
+    public FieldInfo Field;
+
+    public string Definition;
+
+    public Exception Exception;
+
+    internal DataDefinitionException(FieldInfo field, string definition, Exception exception) :
+        base($"{definition} of {field.DeclaringType?.FullName}.{field.Name} is {exception}") =>
+        (Field, Definition, Exception) = (field, definition, exception);
 }

@@ -1,9 +1,6 @@
 ﻿using FlyByWireless.SimConnect;
 using FlyByWireless.SimConnect.Data;
-using System;
 using System.Runtime.InteropServices;
-using System.Threading;
-using System.Threading.Tasks;
 
 TaskCompletionSource tcs = new();
 using SimConnect client = new();
@@ -40,8 +37,8 @@ _ = (await client.SubscribeToSystemEventAsync((_, e) =>
     CancellationTokenSource cts = new(10000);
     try
     {
-        await foreach (var ll in (await client.RequestDataOnSimObjectAsync<Info>(0, Period.Once, DataRequestFlags.Tagged, limit: 5)).WithCancellation(cts.Token))
-            Console.WriteLine($"{ll.Title}: {ll.Struct_LatLonAlt}, {ll.AltitudeFt}ft = {ll.Plane_Altitude}m, ground={ll.Ground_Altitude}m");
+        await foreach (var ll in (await client.RequestDataOnSimObjectAsync<Info>(0, Period.VisualFrame, interval: 4)).WithCancellation(cts.Token))
+            Console.WriteLine($"{ll.Position_deg_deg_m}");
     }
     catch (OperationCanceledException) { }
 }
@@ -50,21 +47,39 @@ Console.WriteLine("undefined");
 await tcs.Task;
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
-struct Info
+readonly struct Info
 {
-    public String260 Title;
+    [DataDefinition("STRUCT LATLONALT")]
+    public readonly LatLonAlt Position_deg_deg_m;
 
-    [DataDefinition("PLANE ALTITUDE", "feet")]
-    public double AltitudeFt;
+    [DataDefinition("PLANE PITCH DEGREES", "degrees")]
+    public readonly float Pitch_deg;
 
-    public LatLonAlt Struct_LatLonAlt;
+    [DataDefinition("PLANE BANK DEGREES", "degrees")]
+    public readonly float Roll_deg;
 
-    public double Plane_Altitude;
+    [DataDefinition("PLANE HEADING DEGREES TRUE", "degrees")]
+    public readonly float Yaw_deg;
 
-    [DataDefinition(unitsName: "meters")]
-    public double Ground_Altitude;
+    [DataDefinition("STRUCT WORLDVELOCITY")]
+    public readonly XYZ LinearVelocities_ft_s;
 
-    public readonly BOOL Com_Recieve_All;
+    [DataDefinition("STRUCT WORLD ROTATION VELOCITY")]
+    public readonly XYZ AngularVelocities_rad_s;
+
+    [DataDefinition("PLANE ALT ABOVE GROUND")]
+    public readonly float AbsoluteAltitude_m;
+
+    [DataDefinition("PRESSURE ALTITUDE")]
+    public readonly float PressureAltitude_m;
+
+    [DataDefinition("TOTAL AIR TEMPERATURE", "Celsius")]
+    public readonly float TAT_C;
+
+    // TODO: Ambient_in_Cloud
+
+    [DataDefinition("COM RECIEVE ALL")] // Microsoft spelled "receive" r-e-c-i-e-v-e
+    public readonly BOOL ComRxAll;
 
     [DataDefinition("COM TRANSMIT:1")]
     public readonly BOOL Com1Tx;
@@ -73,14 +88,14 @@ struct Info
     public readonly BOOL Com2Tx;
 
     [DataDefinition("COM ACTIVE FREQUENCY:1", "kHz")]
-    public int ComActiveFrequency1_kHz;
+    public readonly int Vhf1Active_kHz;
 
-    [DataDefinition("COM ACTIVE FREQUENCY:1", FrequencyBCD16.UnitsName)]
-    public FrequencyBCD16 ComActiveFrequency1_bcd16;
+    [DataDefinition("COM STANDBY FREQUENCY:1", "kHz")]
+    public readonly int Vhf1Standby_kHz;
 
-    [DataDefinition("TRANSPONDER CODE:1")]
-    public int TransponderCode1_dco;
+    [DataDefinition("COM ACTIVE FREQUENCY:2", "kHz")]
+    public readonly int Vhf2Active_kHz;
 
-    [DataDefinition("TRANSPONDER CODE:1", BCO16.UnitsName)]
-    public BCO16 TransponderCode1_bco16;
+    [DataDefinition("COM STANDBY FREQUENCY:2", "kHz")]
+    public readonly int Vhf2Standby_kHz;
 }
