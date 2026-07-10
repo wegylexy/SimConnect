@@ -148,6 +148,94 @@ if header.id == simconnect::proto::enums::RecvId::Exception as u32 {
 }
 ```
 
+## AI-controlled objects
+
+The full FSX-era AI object API is implemented: `ai_create_parked_atc_aircraft`,
+`ai_create_enroute_atc_aircraft`, `ai_create_non_atc_aircraft`,
+`ai_create_simulated_object`, `ai_release_control`, `ai_remove_object`,
+`ai_set_aircraft_flight_plan`. The server-assigned object id for a
+just-created object arrives later, out of band, as a
+`RECV_ASSIGNED_OBJECT_ID` carrying the `request_id` you passed in — dispatch
+on `RecvId::AssignedObjectId` and decode with
+`simconnect_proto::recv::parse_assigned_object_id`, the same pattern as
+exception correlation above.
+
+```rust
+use simconnect::proto::data::InitPosition;
+
+let request_id = sim
+    .ai_create_non_atc_aircraft(
+        "Boeing 747-8i Asobo",
+        "N747BA",
+        &InitPosition {
+            latitude: 47.44,
+            longitude: -122.30,
+            altitude: 433.0,
+            pitch: 0.0,
+            bank: 0.0,
+            heading: 270.0,
+            on_ground: true,
+            airspeed: 0,
+        },
+        1,
+    )
+    .await?;
+
+let packet = sim.recv_ref().await?;
+let mut r = simconnect::proto::codec::PacketReader::new(&packet);
+let header = r.header()?;
+if header.id == simconnect::proto::enums::RecvId::AssignedObjectId as u32 {
+    let assigned = simconnect::proto::recv::parse_assigned_object_id(&mut r)?;
+    if assigned.request_id == request_id {
+        println!("created object id {}", assigned.object_id);
+    }
+}
+```
+
+To move a created object afterward — e.g. driving its position from
+externally-tracked traffic data — keep control with the AI system (skip
+`ai_release_control`) and periodically push a position update via the
+same data-definition mechanism used for reading/writing the user
+aircraft, targeting the assigned object id instead of `0`:
+
+```rust
+use simconnect::DataDefinition;
+
+#[derive(DataDefinition)]
+struct Position {
+    #[simconnect(name = "PLANE LATITUDE", units = "degrees")]
+    latitude: f64,
+    #[simconnect(name = "PLANE LONGITUDE", units = "degrees")]
+    longitude: f64,
+    #[simconnect(name = "PLANE ALTITUDE", units = "feet")]
+    altitude: f64,
+    #[simconnect(name = "PLANE HEADING DEGREES TRUE", units = "degrees")]
+    heading: f64,
+}
+
+let movement = sim.define_data::<Position>(2).await?; // separate define_id from any other definition
+
+// ...once per incoming traffic update — `DataDefinitionGuard::set_data_on_sim_object`
+// encodes `value` and fills in `movement`'s own define_id/flags/unit size for you:
+movement
+    .set_data_on_sim_object(
+        assigned.object_id,
+        &Position {
+            latitude: 47.4502,
+            longitude: -122.3088,
+            altitude: 480.0,
+            heading: 275.0,
+        },
+    )
+    .await?;
+```
+
+MSFS2024 added `_EX1` variants of `AICreateSimulatedObject`/
+`AICreateEnrouteATCAircraft` (adding a livery parameter for modular
+SimObjects) — not implemented, since no wire opcode for them is sourced
+yet; the non-`_EX1` functions above are unaffected and work unchanged on
+MSFS2024.
+
 ## Gotchas: BCD16, octal squawk codes, and other common hiccups
 
 - **`Bco16` and `FrequencyBcd16` are 4 bytes on the wire, not 2**, even

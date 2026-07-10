@@ -98,6 +98,56 @@ impl Waypoint {
     }
 }
 
+/// `SIMCONNECT_DATA_INITPOSITION`: initial position/attitude for the user
+/// aircraft or an AI-created object (`send::ai_create_non_atc_aircraft`/
+/// `ai_create_simulated_object`). Field order confirmed against the
+/// official struct definition (`Latitude`/`Longitude`/`Altitude`/`Pitch`/
+/// `Bank`/`Heading`/`OnGround`(`DWORD`)/`Airspeed`(`DWORD`)).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct InitPosition {
+    /// degrees
+    pub latitude: f64,
+    /// degrees
+    pub longitude: f64,
+    /// feet
+    pub altitude: f64,
+    /// degrees
+    pub pitch: f64,
+    /// degrees
+    pub bank: f64,
+    /// degrees
+    pub heading: f64,
+    pub on_ground: bool,
+    /// knots
+    pub airspeed: u32,
+}
+
+impl InitPosition {
+    pub fn write_le(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&self.latitude.to_le_bytes());
+        buf.extend_from_slice(&self.longitude.to_le_bytes());
+        buf.extend_from_slice(&self.altitude.to_le_bytes());
+        buf.extend_from_slice(&self.pitch.to_le_bytes());
+        buf.extend_from_slice(&self.bank.to_le_bytes());
+        buf.extend_from_slice(&self.heading.to_le_bytes());
+        buf.extend_from_slice(&(self.on_ground as u32).to_le_bytes());
+        buf.extend_from_slice(&self.airspeed.to_le_bytes());
+    }
+
+    pub fn read_le(r: &mut PacketReader) -> Result<Self, TooShort> {
+        Ok(Self {
+            latitude: r.f64()?,
+            longitude: r.f64()?,
+            altitude: r.f64()?,
+            pitch: r.f64()?,
+            bank: r.f64()?,
+            heading: r.f64()?,
+            on_ground: r.bool32()?,
+            airspeed: r.u32()?,
+        })
+    }
+}
+
 /// `SIMCONNECT_DATA_MARKERSTATE`: a fixed 64-byte Latin-1 name plus a
 /// boolean state stored as a 32-bit int (SimConnect's usual `BOOL`
 /// convention).
@@ -179,6 +229,24 @@ mod tests {
             },
             Waypoint::write_le,
             Waypoint::read_le,
+        );
+    }
+
+    #[test]
+    fn init_position_round_trips() {
+        round_trip(
+            InitPosition {
+                latitude: 47.44,
+                longitude: -122.30,
+                altitude: 433.0,
+                pitch: 0.0,
+                bank: 0.0,
+                heading: 270.0,
+                on_ground: true,
+                airspeed: 0,
+            },
+            InitPosition::write_le,
+            InitPosition::read_le,
         );
     }
 

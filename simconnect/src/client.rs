@@ -390,6 +390,143 @@ impl SimConnect {
         self.connection.send(packet).await
     }
 
+    /// Creates an AI-controlled aircraft currently parked with no flight
+    /// plan. The server-assigned object id arrives later, out of band, as
+    /// a `RECV_ASSIGNED_OBJECT_ID` carrying this call's `request_id` —
+    /// dispatch on the header's `RecvId::AssignedObjectId` and decode with
+    /// `simconnect_proto::recv::parse_assigned_object_id`. Follow up with
+    /// [`Self::ai_set_aircraft_flight_plan`] to set it in motion.
+    pub async fn ai_create_parked_atc_aircraft(
+        &self,
+        container_title: &str,
+        tail_number: &str,
+        airport_id: &str,
+        request_id: u32,
+    ) -> Result<u32, ClientError> {
+        let packet = simconnect_proto::send::ai_create_parked_atc_aircraft(
+            self.connection.protocol_version_wire(),
+            container_title,
+            tail_number,
+            airport_id,
+            request_id,
+        )?;
+        Ok(self.connection.send(packet).await?)
+    }
+
+    /// Creates an AI-controlled aircraft already underway on a flight
+    /// plan, on the ground or airborne — typically IFR, in constant radio
+    /// contact with ATC. See [`Self::ai_create_parked_atc_aircraft`] for
+    /// how to retrieve the assigned object id.
+    pub async fn ai_create_enroute_atc_aircraft(
+        &self,
+        container_title: &str,
+        tail_number: &str,
+        flight_number: i32,
+        flight_plan_path: &str,
+        flight_plan_position: f64,
+        touch_and_go: bool,
+        request_id: u32,
+    ) -> Result<u32, ClientError> {
+        let packet = simconnect_proto::send::ai_create_enroute_atc_aircraft(
+            self.connection.protocol_version_wire(),
+            container_title,
+            tail_number,
+            flight_number,
+            flight_plan_path,
+            flight_plan_position,
+            touch_and_go,
+            request_id,
+        )?;
+        Ok(self.connection.send(packet).await?)
+    }
+
+    /// Creates an aircraft not under ATC control (typically VFR) — also
+    /// the entry point for helicopters/gliders/balloons, which have no
+    /// internal AI pilot. See
+    /// [`Self::ai_create_parked_atc_aircraft`] for how to retrieve the
+    /// assigned object id.
+    pub async fn ai_create_non_atc_aircraft(
+        &self,
+        container_title: &str,
+        tail_number: &str,
+        init_position: &simconnect_proto::data::InitPosition,
+        request_id: u32,
+    ) -> Result<u32, ClientError> {
+        let packet = simconnect_proto::send::ai_create_non_atc_aircraft(
+            self.connection.protocol_version_wire(),
+            container_title,
+            tail_number,
+            init_position,
+            request_id,
+        )?;
+        Ok(self.connection.send(packet).await?)
+    }
+
+    /// Creates an AI-controlled object other than an aircraft (ground
+    /// vehicles, boats, and other `sim.cfg`-defined simulation objects).
+    /// See [`Self::ai_create_parked_atc_aircraft`] for how to retrieve the
+    /// assigned object id.
+    pub async fn ai_create_simulated_object(
+        &self,
+        container_title: &str,
+        init_position: &simconnect_proto::data::InitPosition,
+        request_id: u32,
+    ) -> Result<u32, ClientError> {
+        let packet = simconnect_proto::send::ai_create_simulated_object(
+            self.connection.protocol_version_wire(),
+            container_title,
+            init_position,
+            request_id,
+        )?;
+        Ok(self.connection.send(packet).await?)
+    }
+
+    /// Transfers control of an AI-created object to this client — without
+    /// this, the AI system and the client may fight over control with
+    /// unpredictable results. `object_id` is the id from the
+    /// `RECV_ASSIGNED_OBJECT_ID` reply to whichever `ai_create_*` call
+    /// created it.
+    pub async fn ai_release_control(&self, object_id: u32, request_id: u32) -> io::Result<u32> {
+        let packet = simconnect_proto::send::ai_release_control(
+            self.connection.protocol_version_wire(),
+            object_id,
+            request_id,
+        );
+        self.connection.send(packet).await
+    }
+
+    /// Removes an AI-created object. A client can only remove objects it
+    /// created, not ones created by another client or by the sim itself.
+    pub async fn ai_remove_object(&self, object_id: u32, request_id: u32) -> io::Result<u32> {
+        let packet = simconnect_proto::send::ai_remove_object(
+            self.connection.protocol_version_wire(),
+            object_id,
+            request_id,
+        );
+        self.connection.send(packet).await
+    }
+
+    /// Sets or changes an AI-controlled aircraft's flight plan —
+    /// typically called some time after
+    /// [`Self::ai_create_parked_atc_aircraft`] to set it in motion.
+    /// `flight_plan_path` is a `.pln` file path (extension optional; a
+    /// bare filename resolves against the default Flight Simulator Files
+    /// directory).
+    pub async fn ai_set_aircraft_flight_plan(
+        &self,
+        object_id: u32,
+        flight_plan_path: &str,
+        request_id: u32,
+    ) -> Result<u32, ClientError> {
+        let packet = simconnect_proto::send::ai_set_aircraft_flight_plan(
+            self.connection.protocol_version_wire(),
+            object_id,
+            flight_plan_path,
+            request_id,
+        )?;
+        Ok(self.connection.send(packet).await?)
+    }
+
     /// Sets a COM radio's frequency, automatically picking the exact-Hz
     /// event on a connection that negotiated MSFS2020+ ("KittyHawk" or
     /// newer) and the legacy 25 kHz BCD16 event otherwise (FSX/pre-2020,

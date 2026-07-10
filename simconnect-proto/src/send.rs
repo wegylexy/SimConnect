@@ -32,6 +32,21 @@ pub mod opcode {
     pub const SUBSCRIBE_TO_SYSTEM_EVENT: u32 = 0xF0000017;
     pub const UNSUBSCRIBE_TO_SYSTEM_EVENT: u32 = 0xF0000018;
 
+    /// AI object creation/control (FSX-era). Cross-confirmed two
+    /// independent ways: these values fall exactly in the `0x1C`-`0x2F`
+    /// gap the prior C# client's `Sends.cs` left unimplemented between its
+    /// last weather opcode (`0x1B`) and its first camera opcode (`0x30`),
+    /// and match another from-scratch reimplementation's independently
+    /// observed values for the same functions (consulted for the fact,
+    /// not cited or copied — this project stays MIT).
+    pub const AI_CREATE_PARKED_ATC_AIRCRAFT: u32 = 0xF0000027;
+    pub const AI_CREATE_ENROUTE_ATC_AIRCRAFT: u32 = 0xF0000028;
+    pub const AI_CREATE_NON_ATC_AIRCRAFT: u32 = 0xF0000029;
+    pub const AI_CREATE_SIMULATED_OBJECT: u32 = 0xF000002A;
+    pub const AI_RELEASE_CONTROL: u32 = 0xF000002B;
+    pub const AI_REMOVE_OBJECT: u32 = 0xF000002C;
+    pub const AI_SET_AIRCRAFT_FLIGHT_PLAN: u32 = 0xF000002D;
+
     /// MSFS2020 additions. Values are `0xF0000000 | small_code`, where
     /// `small_code` is independently-observed wire-protocol behavior, not
     /// copied code — this project is MIT and doesn't cite or attribute any
@@ -302,6 +317,132 @@ pub fn unsubscribe_to_system_event(protocol_version: u32, event_id: u32) -> Pack
     w
 }
 
+/// Creates an AI-controlled aircraft that's currently parked with no
+/// flight plan (`szContainerTitle`/`szTailNumber`/`szAirportID` widths —
+/// 256/12/5 — per research into observed wire behavior). Follow up with
+/// [`ai_set_aircraft_flight_plan`] to set it in motion.
+pub fn ai_create_parked_atc_aircraft(
+    protocol_version: u32,
+    container_title: &str,
+    tail_number: &str,
+    airport_id: &str,
+    request_id: u32,
+) -> Result<PacketWriter, FixedStringError> {
+    let mut w = PacketWriter::new(opcode::AI_CREATE_PARKED_ATC_AIRCRAFT, protocol_version);
+    w.fixed_str(256, container_title)?;
+    w.fixed_str(12, tail_number)?;
+    w.fixed_str(5, airport_id)?;
+    w.u32(request_id);
+    Ok(w)
+}
+
+/// Creates an AI-controlled aircraft already underway on a flight plan
+/// (on the ground or airborne), typically flying under IFR in constant
+/// radio contact with ATC.
+pub fn ai_create_enroute_atc_aircraft(
+    protocol_version: u32,
+    container_title: &str,
+    tail_number: &str,
+    flight_number: i32,
+    flight_plan_path: &str,
+    flight_plan_position: f64,
+    touch_and_go: bool,
+    request_id: u32,
+) -> Result<PacketWriter, FixedStringError> {
+    let mut w = PacketWriter::new(opcode::AI_CREATE_ENROUTE_ATC_AIRCRAFT, protocol_version);
+    w.fixed_str(256, container_title)?;
+    w.fixed_str(12, tail_number)?;
+    w.i32(flight_number);
+    w.fixed_str(260, flight_plan_path)?;
+    w.f64(flight_plan_position);
+    w.u32(touch_and_go as u32);
+    w.u32(request_id);
+    Ok(w)
+}
+
+/// Creates an aircraft not under ATC control (typically flying VFR) —
+/// there's no internal AI pilot for helicopters, gliders, or balloons, so
+/// this is also the entry point for those (use
+/// [`ai_create_simulated_object`] instead for non-aircraft objects).
+pub fn ai_create_non_atc_aircraft(
+    protocol_version: u32,
+    container_title: &str,
+    tail_number: &str,
+    init_position: &crate::data::InitPosition,
+    request_id: u32,
+) -> Result<PacketWriter, FixedStringError> {
+    let mut w = PacketWriter::new(opcode::AI_CREATE_NON_ATC_AIRCRAFT, protocol_version);
+    w.fixed_str(256, container_title)?;
+    w.fixed_str(12, tail_number)?;
+    write_init_position(&mut w, init_position);
+    w.u32(request_id);
+    Ok(w)
+}
+
+/// Creates an AI-controlled object other than an aircraft (ground
+/// vehicles, boats, and other simulation objects defined by a `sim.cfg`
+/// container title) — can also create a stationary, unflyable aircraft.
+pub fn ai_create_simulated_object(
+    protocol_version: u32,
+    container_title: &str,
+    init_position: &crate::data::InitPosition,
+    request_id: u32,
+) -> Result<PacketWriter, FixedStringError> {
+    let mut w = PacketWriter::new(opcode::AI_CREATE_SIMULATED_OBJECT, protocol_version);
+    w.fixed_str(256, container_title)?;
+    write_init_position(&mut w, init_position);
+    w.u32(request_id);
+    Ok(w)
+}
+
+fn write_init_position(w: &mut PacketWriter, pos: &crate::data::InitPosition) {
+    w.f64(pos.latitude);
+    w.f64(pos.longitude);
+    w.f64(pos.altitude);
+    w.f64(pos.pitch);
+    w.f64(pos.bank);
+    w.f64(pos.heading);
+    w.u32(pos.on_ground as u32);
+    w.u32(pos.airspeed);
+}
+
+/// Transfers control of an AI-created object (typically an aircraft) to
+/// this SimConnect client — without this, the AI system and the client
+/// may fight over control with unpredictable results. `object_id` is the
+/// server-assigned id from the `RecvAssignedObjectId` reply to whichever
+/// `ai_create_*` call created it.
+pub fn ai_release_control(protocol_version: u32, object_id: u32, request_id: u32) -> PacketWriter {
+    let mut w = PacketWriter::new(opcode::AI_RELEASE_CONTROL, protocol_version);
+    w.u32(object_id).u32(request_id);
+    w
+}
+
+/// Removes an AI-created object. A client can only remove objects it
+/// created, not ones created by another client or by the sim itself.
+pub fn ai_remove_object(protocol_version: u32, object_id: u32, request_id: u32) -> PacketWriter {
+    let mut w = PacketWriter::new(opcode::AI_REMOVE_OBJECT, protocol_version);
+    w.u32(object_id).u32(request_id);
+    w
+}
+
+/// Sets or changes an AI-controlled aircraft's flight plan — typically
+/// called some time after [`ai_create_parked_atc_aircraft`] to set it in
+/// motion. `flight_plan_path` is a `.pln` file path (extension optional;
+/// a bare filename resolves against the default Flight Simulator Files
+/// directory).
+pub fn ai_set_aircraft_flight_plan(
+    protocol_version: u32,
+    object_id: u32,
+    flight_plan_path: &str,
+    request_id: u32,
+) -> Result<PacketWriter, FixedStringError> {
+    let mut w = PacketWriter::new(opcode::AI_SET_AIRCRAFT_FLIGHT_PLAN, protocol_version);
+    w.u32(object_id);
+    w.fixed_str(260, flight_plan_path)?;
+    w.u32(request_id);
+    Ok(w)
+}
+
 // MSFS2020 additions. Field presence and order for the primary
 // parameters (define/request IDs, ICAO/name strings, hashes) are
 // confirmed against a working implementation observed during research;
@@ -449,4 +590,130 @@ pub fn subscribe_input_event(protocol_version: u32, input_event_hash: u64) -> Pa
     let mut w = PacketWriter::new(opcode::kittyhawk::SUBSCRIBE_INPUT_EVENT, protocol_version);
     w.bytes(&input_event_hash.to_le_bytes());
     w
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::codec::PacketReader;
+    use crate::data::InitPosition;
+
+    fn header_id(packet: &[u8]) -> u32 {
+        PacketReader::new(packet).header().unwrap().id
+    }
+
+    #[test]
+    fn ai_create_parked_atc_aircraft_has_expected_opcode_and_layout() {
+        let packet = ai_create_parked_atc_aircraft(4, "Boeing 747-8i Asobo", "N747BA", "KSEA", 42)
+            .unwrap()
+            .finish(1);
+        assert_eq!(header_id(&packet), opcode::AI_CREATE_PARKED_ATC_AIRCRAFT);
+        let mut r = PacketReader::new(&packet);
+        r.header().unwrap();
+        assert_eq!(r.fixed_str(256).unwrap(), "Boeing 747-8i Asobo");
+        assert_eq!(r.fixed_str(12).unwrap(), "N747BA");
+        assert_eq!(r.fixed_str(5).unwrap(), "KSEA");
+        assert_eq!(r.u32().unwrap(), 42);
+    }
+
+    #[test]
+    fn ai_create_enroute_atc_aircraft_has_expected_opcode_and_layout() {
+        let packet = ai_create_enroute_atc_aircraft(
+            4,
+            "Boeing 747-8i Asobo",
+            "N747BA",
+            123,
+            "myflightplan",
+            0.5,
+            true,
+            42,
+        )
+        .unwrap()
+        .finish(1);
+        assert_eq!(header_id(&packet), opcode::AI_CREATE_ENROUTE_ATC_AIRCRAFT);
+        let mut r = PacketReader::new(&packet);
+        r.header().unwrap();
+        assert_eq!(r.fixed_str(256).unwrap(), "Boeing 747-8i Asobo");
+        assert_eq!(r.fixed_str(12).unwrap(), "N747BA");
+        assert_eq!(r.i32().unwrap(), 123);
+        assert_eq!(r.fixed_str(260).unwrap(), "myflightplan");
+        assert_eq!(r.f64().unwrap(), 0.5);
+        assert_eq!(r.u32().unwrap(), 1); // touch_and_go
+        assert_eq!(r.u32().unwrap(), 42);
+    }
+
+    fn sample_init_position() -> InitPosition {
+        InitPosition {
+            latitude: 47.44,
+            longitude: -122.30,
+            altitude: 433.0,
+            pitch: 0.0,
+            bank: 0.0,
+            heading: 270.0,
+            on_ground: true,
+            airspeed: 0,
+        }
+    }
+
+    #[test]
+    fn ai_create_non_atc_aircraft_has_expected_opcode_and_layout() {
+        let pos = sample_init_position();
+        let packet = ai_create_non_atc_aircraft(4, "Boeing 747-8i Asobo", "N747BA", &pos, 42)
+            .unwrap()
+            .finish(1);
+        assert_eq!(header_id(&packet), opcode::AI_CREATE_NON_ATC_AIRCRAFT);
+        let mut r = PacketReader::new(&packet);
+        r.header().unwrap();
+        assert_eq!(r.fixed_str(256).unwrap(), "Boeing 747-8i Asobo");
+        assert_eq!(r.fixed_str(12).unwrap(), "N747BA");
+        assert_eq!(InitPosition::read_le(&mut r).unwrap(), pos);
+        assert_eq!(r.u32().unwrap(), 42);
+    }
+
+    #[test]
+    fn ai_create_simulated_object_has_expected_opcode_and_layout() {
+        let pos = sample_init_position();
+        let packet = ai_create_simulated_object(4, "Boeing 747-8i Asobo", &pos, 42)
+            .unwrap()
+            .finish(1);
+        assert_eq!(header_id(&packet), opcode::AI_CREATE_SIMULATED_OBJECT);
+        let mut r = PacketReader::new(&packet);
+        r.header().unwrap();
+        assert_eq!(r.fixed_str(256).unwrap(), "Boeing 747-8i Asobo");
+        assert_eq!(InitPosition::read_le(&mut r).unwrap(), pos);
+        assert_eq!(r.u32().unwrap(), 42);
+    }
+
+    #[test]
+    fn ai_release_control_has_expected_opcode_and_layout() {
+        let packet = ai_release_control(4, 100, 42).finish(1);
+        assert_eq!(header_id(&packet), opcode::AI_RELEASE_CONTROL);
+        let mut r = PacketReader::new(&packet);
+        r.header().unwrap();
+        assert_eq!(r.u32().unwrap(), 100);
+        assert_eq!(r.u32().unwrap(), 42);
+    }
+
+    #[test]
+    fn ai_remove_object_has_expected_opcode_and_layout() {
+        let packet = ai_remove_object(4, 100, 42).finish(1);
+        assert_eq!(header_id(&packet), opcode::AI_REMOVE_OBJECT);
+        let mut r = PacketReader::new(&packet);
+        r.header().unwrap();
+        assert_eq!(r.u32().unwrap(), 100);
+        assert_eq!(r.u32().unwrap(), 42);
+    }
+
+    #[test]
+    fn ai_set_aircraft_flight_plan_has_expected_opcode_and_layout() {
+        let packet = ai_set_aircraft_flight_plan(4, 100, "myflightplan", 42)
+            .unwrap()
+            .finish(1);
+        assert_eq!(header_id(&packet), opcode::AI_SET_AIRCRAFT_FLIGHT_PLAN);
+        let mut r = PacketReader::new(&packet);
+        r.header().unwrap();
+        assert_eq!(r.u32().unwrap(), 100);
+        assert_eq!(r.fixed_str(260).unwrap(), "myflightplan");
+        assert_eq!(r.u32().unwrap(), 42);
+    }
 }

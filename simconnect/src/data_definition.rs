@@ -45,6 +45,30 @@ impl<T: DataDefinition> DataDefinitionGuard<T> {
     pub fn encode(&self, value: &T) -> Result<Vec<u8>, FixedStringError> {
         value.encode()
     }
+
+    /// Encodes `value` and sends it as a `SetDataOnSimObject` targeting
+    /// `object_id` (`0` for the user aircraft, or the id from a
+    /// `RECV_ASSIGNED_OBJECT_ID` reply for an AI-created object) — the
+    /// same call as [`SimConnect::set_data_on_sim_object`], but without
+    /// needing to pass this guard's own `define_id`, encode `value`
+    /// yourself, or spell out `DataSetFlags::empty()`/a `0` unit size for
+    /// the common "write one value" case.
+    pub async fn set_data_on_sim_object(
+        &self,
+        object_id: u32,
+        value: &T,
+    ) -> Result<u32, ClientError> {
+        let bytes = value.encode()?;
+        let packet = simconnect_proto::send::set_data_on_sim_object(
+            self.connection.protocol_version_wire(),
+            self.define_id,
+            object_id,
+            simconnect_proto::enums::DataSetFlags::empty(),
+            0,
+            &bytes,
+        );
+        Ok(self.connection.send(packet).await?)
+    }
 }
 
 impl<T: DataDefinition> Drop for DataDefinitionGuard<T> {
