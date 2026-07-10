@@ -4,11 +4,10 @@ A pure-Rust, from-scratch client for Microsoft Flight Simulator's SimConnect
 wire protocol — no `SimConnect.dll` dependency, so it can be statically
 linked into any Rust binary (Windows, or remote/cross-platform over TCP).
 
-This branch is a Rust port of an earlier C# implementation (see
-`main`/`dev`), targeting FSX's protocol range as the core scope for now.
-MSFS 2020 ("KittyHawk") and MSFS 2024 ("SunRise") protocol entries and
-opcodes are also included, behind the `kittyhawk`/`sunrise` feature flags
-described below.
+This is a Rust port of an earlier C# implementation, targeting FSX's
+protocol range as the core scope for now. MSFS 2020 ("KittyHawk") and
+MSFS 2024 ("SunRise") protocol entries and opcodes are also included,
+behind the `kittyhawk`/`sunrise` feature flags described below.
 
 ## Crates
 
@@ -105,7 +104,7 @@ loop {
 // (fire-and-forget onto the current tokio runtime).
 ```
 
-Full runnable version: [`simconnect/examples/data_definition.rs`](simconnect/examples/data_definition.rs)
+Full runnable version: [`examples/data_definition.rs`](https://github.com/wegylexy/SimConnect/blob/rust/simconnect/examples/data_definition.rs)
 (`cargo run --example data_definition`). Supported field types: `bool`,
 `i32`, `i64`, `f32`, `f64`, the fixed-width `String8`..`String260` types,
 `Waypoint`/`LatLonAlt`/`Xyz`/`MarkerState`, and `Bco16`/`FrequencyBcd16`
@@ -169,7 +168,9 @@ if header.id == simconnect::proto::enums::RecvId::Exception as u32 {
 - **`FrequencyBcd16` only handles 25 kHz-spaced (and coarser) COM
   frequencies** — it structurally cannot represent 8.33 kHz-only channels
   (several of them collide with a 25 kHz-spaced value's encoding; see the
-  type's module docs in `simconnect-proto/src/bcd.rs` for the derivation).
+  type's module docs in `simconnect-proto`'s
+  [`bcd.rs`](https://github.com/wegylexy/SimConnect/blob/rust/simconnect-proto/src/bcd.rs)
+  for the derivation).
   For 8.33 kHz-capable radios, request the frequency as a plain
   `f64`/`u32` with `Units = "Hz"`/`"MHz"` instead — `add_com_frequency_definition`/
   `set_com_frequency` already do this automatically; there's no
@@ -190,7 +191,7 @@ if header.id == simconnect::proto::enums::RecvId::Exception as u32 {
 
 ## Comparison with the official SDK and other ports
 
-| Capability | Official SDK (2024) | Prior C# client (`main`/`dev`) | This crate |
+| Capability | Official SDK (2024) | Prior C# implementation | This crate |
 |---|---|---|---|
 | Transport | Named pipe, TCP | Named pipe only, hardcoded path | Named pipe + TCP + `SimConnect.cfg` discovery |
 | Protocol table | RTM…SunRise (12.2/282174.999) | RTM…FSX SE beta (10/63003) | Same 5-entry table, reconnect-per-attempt negotiation |
