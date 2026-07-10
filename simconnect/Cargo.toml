@@ -1,0 +1,34 @@
+[package]
+name = "flybywireless-simconnect"
+description = "Pure-Rust SimConnect client (named pipe or TCP), no SimConnect.dll dependency."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+# Crates.io package name is `flybywireless-simconnect` (the plain
+# `simconnect` name is taken), but the compiled crate name stays
+# `simconnect` — the derive macro's generated code hardcodes
+# `::simconnect::...` paths (see simconnect-derive/src/lib.rs), and this
+# keeps every `use simconnect::...` in this crate's own examples/tests
+# unchanged. External consumers depending on the published package need
+# their own `simconnect = { package = "flybywireless-simconnect", ... }`
+# alias to get the same short import name.
+[lib]
+name = "simconnect"
+
+[dependencies]
+simconnect-proto = { package = "flybywireless-simconnect-proto", version = "0.1.0", path = "../simconnect-proto", default-features = false }
+simconnect-derive = { package = "flybywireless-simconnect-derive", version = "0.1.0", path = "../simconnect-derive" }
+tokio = { version = "1", features = ["rt", "net", "sync", "io-util", "macros", "time"] }
+
+[features]
+default = ["kittyhawk", "sunrise"]
+kittyhawk = ["simconnect-proto/kittyhawk"]
+sunrise = ["kittyhawk", "simconnect-proto/sunrise"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros"] }

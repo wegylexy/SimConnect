@@ -1,0 +1,18 @@
+[package]
+name = "flybywireless-simconnect-derive"
+description = "#[derive(DataDefinition)] proc macro for the simconnect crate."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"

@@ -1,0 +1,20 @@
+[package]
+name = "flybywireless-simconnect-proto"
+description = "SimConnect wire protocol: packet encoding/decoding, enums, and version tables. No I/O."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+bitflags = "2"
+
+[features]
+default = ["kittyhawk", "sunrise"]
+# MSFS 2020 additions (major version 11).
+kittyhawk = []
+# MSFS 2024 additions (major version 12). Implies kittyhawk.
+sunrise = ["kittyhawk"]

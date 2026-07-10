@@ -1,0 +1,23 @@
+[package]
+name = "flybywireless-simconnect-cli"
+description = "Manual smoke-test binary for the simconnect crate."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[[bin]]
+name = "simconnect-cli"
+path = "src/main.rs"
+
+[dependencies]
+simconnect = { package = "flybywireless-simconnect", version = "0.1.0", path = "../simconnect", default-features = false }
+tokio = { version = "1", features = ["rt", "macros"] }
+
+[features]
+default = ["kittyhawk", "sunrise"]
+kittyhawk = ["simconnect/kittyhawk"]
+sunrise = ["kittyhawk", "simconnect/sunrise"]
