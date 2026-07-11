@@ -44,22 +44,20 @@ pub fn parse(contents: &str) -> HashMap<u32, CfgEntry> {
     let mut address = String::new();
     let mut port = 0u16;
 
-    let flush = |sections: &mut HashMap<u32, CfgEntry>,
-                 current: Option<u32>,
-                 address: &str,
-                 port: u16| {
-        if let Some(idx) = current {
-            if !address.is_empty() && port != 0 {
-                sections.insert(
-                    idx,
-                    CfgEntry {
-                        address: address.to_string(),
-                        port,
-                    },
-                );
+    let flush =
+        |sections: &mut HashMap<u32, CfgEntry>, current: Option<u32>, address: &str, port: u16| {
+            if let Some(idx) = current {
+                if !address.is_empty() && port != 0 {
+                    sections.insert(
+                        idx,
+                        CfgEntry {
+                            address: address.to_string(),
+                            port,
+                        },
+                    );
+                }
             }
-        }
-    };
+        };
 
     for line in contents.lines() {
         let line = line.trim();
@@ -71,10 +69,7 @@ pub fn parse(contents: &str) -> HashMap<u32, CfgEntry> {
             let name = &line[1..line.len() - 1];
             current = if name.eq_ignore_ascii_case("SimConnect") {
                 Some(0)
-            } else if let Some(suffix) = name
-                .to_ascii_lowercase()
-                .strip_prefix("simconnect.")
-            {
+            } else if let Some(suffix) = name.to_ascii_lowercase().strip_prefix("simconnect.") {
                 suffix.parse().ok()
             } else {
                 None

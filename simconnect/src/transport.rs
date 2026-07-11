@@ -36,7 +36,9 @@ pub async fn connect_tcp(host: &str, port: u16) -> io::Result<tokio::net::TcpStr
 /// retrying briefly if the pipe exists but its listener backlog is
 /// momentarily full (`ERROR_PIPE_BUSY`).
 #[cfg(windows)]
-pub async fn connect_pipe(pipe_name: &str) -> io::Result<tokio::net::windows::named_pipe::NamedPipeClient> {
+pub async fn connect_pipe(
+    pipe_name: &str,
+) -> io::Result<tokio::net::windows::named_pipe::NamedPipeClient> {
     use tokio::net::windows::named_pipe::ClientOptions;
 
     let mut last_err = None;

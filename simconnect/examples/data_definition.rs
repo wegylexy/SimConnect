@@ -37,7 +37,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     #[cfg(windows)]
     let sim = match env::args().nth(1) {
-        Some(port) => simconnect::SimConnect::open_tcp(app_name, "127.0.0.1", port.parse()?).await?,
+        Some(port) => {
+            simconnect::SimConnect::open_tcp(app_name, "127.0.0.1", port.parse()?).await?
+        }
         None => simconnect::SimConnect::open_local(app_name).await?,
     };
     #[cfg(not(windows))]

@@ -7,8 +7,8 @@
 
 use std::sync::Arc;
 
-pub use simconnect_proto::data_definition::{DataDefinition, FieldSpec};
 use simconnect_proto::codec::TooShort;
+pub use simconnect_proto::data_definition::{DataDefinition, FieldSpec};
 use simconnect_proto::strings::FixedStringError;
 
 use crate::client::{ClientError, SimConnect};

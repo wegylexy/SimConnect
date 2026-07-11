@@ -115,8 +115,14 @@ impl Connection {
             if header.id == simconnect_proto::enums::RecvId::Open as u32 {
                 if let Ok(open) = recv::parse_open(&mut r) {
                     return Ok(Self {
-                        read: Mutex::new(ReadSide { half: read_half, buf: Vec::new() }),
-                        write: Mutex::new(WriteSide { half: write_half, next_send_id: 2 }),
+                        read: Mutex::new(ReadSide {
+                            half: read_half,
+                            buf: Vec::new(),
+                        }),
+                        write: Mutex::new(WriteSide {
+                            half: write_half,
+                            next_send_id: 2,
+                        }),
                         protocol,
                         open,
                     });
@@ -242,8 +248,14 @@ mod tests {
         let (read_half, write_half) = tokio::io::split(Box::new(sim_side) as Box<dyn Transport>);
 
         let conn = Arc::new(Connection {
-            read: Mutex::new(ReadSide { half: read_half, buf: Vec::new() }),
-            write: Mutex::new(WriteSide { half: write_half, next_send_id: 2 }),
+            read: Mutex::new(ReadSide {
+                half: read_half,
+                buf: Vec::new(),
+            }),
+            write: Mutex::new(WriteSide {
+                half: write_half,
+                next_send_id: 2,
+            }),
             protocol: ProtocolVersion::negotiation_order()[0],
             open: RecvOpen {
                 application_name: String::new(),
@@ -288,6 +300,9 @@ mod tests {
             conn2.send(PacketWriter::new(0xF0000001, 0)).await
         })
         .await;
-        assert!(send_result.is_ok(), "send() blocked while a recv() guard was held");
+        assert!(
+            send_result.is_ok(),
+            "send() blocked while a recv() guard was held"
+        );
     }
 }

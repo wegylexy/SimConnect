@@ -57,19 +57,16 @@ pub fn decode_fixed(buf: &[u8]) -> String {
 macro_rules! fixed_string_type {
     ($name:ident, $width:expr) => {
         #[doc = concat!(
-            "Fixed-width, ", stringify!($width),
-            "-byte Latin-1 wire string (`SIMCONNECT_STRING", stringify!($width), "`)."
-        )]
+                    "Fixed-width, ", stringify!($width),
+                    "-byte Latin-1 wire string (`SIMCONNECT_STRING", stringify!($width), "`)."
+                )]
         #[derive(Debug, Clone, PartialEq, Eq, Default)]
         pub struct $name(pub String);
 
         impl $name {
             pub const WIDTH: usize = $width;
 
-            pub fn write_le(
-                &self,
-                buf: &mut Vec<u8>,
-            ) -> Result<(), FixedStringError> {
+            pub fn write_le(&self, buf: &mut Vec<u8>) -> Result<(), FixedStringError> {
                 let start = buf.len();
                 buf.resize(start + Self::WIDTH, 0);
                 encode_fixed(&mut buf[start..], &self.0)

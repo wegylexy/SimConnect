@@ -401,7 +401,9 @@ pub mod kittyhawk {
         pub event_type: u32,
     }
 
-    fn parse_input_event_descriptor(r: &mut PacketReader) -> Result<InputEventDescriptor, TooShort> {
+    fn parse_input_event_descriptor(
+        r: &mut PacketReader,
+    ) -> Result<InputEventDescriptor, TooShort> {
         Ok(InputEventDescriptor {
             name: r.fixed_str(64)?,
             hash: r.u64()?,
@@ -494,15 +496,9 @@ mod tests {
 
         #[test]
         fn facility_data_send_and_recv_round_trip() {
-            let packet = send::request_facility_data(
-                4,
-                1,
-                2,
-                "KSEA",
-                None,
-            )
-            .unwrap()
-            .finish(9);
+            let packet = send::request_facility_data(4, 1, 2, "KSEA", None)
+                .unwrap()
+                .finish(9);
             let mut r = PacketReader::new(&packet);
             let header = r.header().unwrap();
             assert_eq!(header.id, send::opcode::kittyhawk::REQUEST_FACILITY_DATA);
@@ -585,10 +581,7 @@ mod tests {
             let packet = send::enumerate_input_events(4, 7).finish(1);
             let mut r = PacketReader::new(&packet);
             let header = r.header().unwrap();
-            assert_eq!(
-                header.id,
-                send::opcode::kittyhawk::ENUMERATE_INPUT_EVENTS
-            );
+            assert_eq!(header.id, send::opcode::kittyhawk::ENUMERATE_INPUT_EVENTS);
 
             let mut w = PacketWriter::new(36, 4);
             w.u32(7).u32(1).u32(0).u32(1); // list template

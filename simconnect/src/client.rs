@@ -19,7 +19,9 @@
 use std::io;
 use std::sync::Arc;
 
-use simconnect_proto::enums::{DataRequestFlags, DataSetFlags, DataType, EventFlags, Period, SimObjectType};
+use simconnect_proto::enums::{
+    DataRequestFlags, DataSetFlags, DataType, EventFlags, Period, SimObjectType,
+};
 use simconnect_proto::events;
 use simconnect_proto::protocol::ProtocolVersion;
 use simconnect_proto::strings::FixedStringError;
@@ -42,7 +44,9 @@ pub enum ClientError {
     /// isn't on the 25 kHz grid (`hz % 25_000 != 0`) while talking to a
     /// pre-MSFS2020 sim, which has no `_HZ` event to send it with — the
     /// legacy `COM_RADIO_SET` event can only carry 25 kHz-aligned values.
-    UnrepresentableOnLegacyRadio { hz: u32 },
+    UnrepresentableOnLegacyRadio {
+        hz: u32,
+    },
 }
 
 impl From<io::Error> for ClientError {
@@ -139,7 +143,11 @@ impl SimConnect {
 
     /// Connects over TCP (remote, or local if the sim's SimConnect.cfg
     /// enabled a TCP listener).
-    pub async fn open_tcp(application_name: &str, host: &str, port: u16) -> Result<Self, OpenError> {
+    pub async fn open_tcp(
+        application_name: &str,
+        host: &str,
+        port: u16,
+    ) -> Result<Self, OpenError> {
         let host = host.to_string();
         Self::open_with(application_name, move || {
             let host = host.clone();
@@ -562,7 +570,8 @@ impl SimConnect {
         if self.negotiated_at_least_kittyhawk() {
             self.set_com_frequency_hz(radio, event_id, hz).await
         } else if hz % 25_000 == 0 {
-            self.set_com_frequency_bcd16(radio, event_id, hz / 1000).await
+            self.set_com_frequency_bcd16(radio, event_id, hz / 1000)
+                .await
         } else {
             Err(ClientError::UnrepresentableOnLegacyRadio { hz })
         }
@@ -594,7 +603,8 @@ impl SimConnect {
         event_id: u32,
         hz: u32,
     ) -> Result<u32, ClientError> {
-        self.map_client_event_to_sim_event(event_id, radio.hz_event_name()).await?;
+        self.map_client_event_to_sim_event(event_id, radio.hz_event_name())
+            .await?;
         Ok(self
             .transmit_client_event(0, event_id, hz as i32, 0, EventFlags::empty())
             .await?)
@@ -612,7 +622,8 @@ impl SimConnect {
         event_id: u32,
         khz: u32,
     ) -> Result<u32, ClientError> {
-        self.map_client_event_to_sim_event(event_id, radio.bcd16_event_name()).await?;
+        self.map_client_event_to_sim_event(event_id, radio.bcd16_event_name())
+            .await?;
         let bcd = FrequencyBcd16::from_khz(khz).0;
         Ok(self
             .transmit_client_event(0, event_id, bcd as i32, 0, EventFlags::empty())
@@ -703,7 +714,8 @@ impl SimConnect {
 
     #[cfg(feature = "kittyhawk")]
     pub async fn enumerate_controllers(&self) -> io::Result<u32> {
-        let packet = simconnect_proto::send::enumerate_controllers(self.connection.protocol_version_wire());
+        let packet =
+            simconnect_proto::send::enumerate_controllers(self.connection.protocol_version_wire());
         self.connection.send(packet).await
     }
 

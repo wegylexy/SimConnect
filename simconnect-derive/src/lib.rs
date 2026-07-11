@@ -63,10 +63,14 @@ fn parse_simconnect_attr(field: &Field) -> syn::Result<FieldAttr> {
                 out.epsilon = Some(match lit {
                     syn::Lit::Float(f) => f.base10_parse()?,
                     syn::Lit::Int(i) => i.base10_parse::<i64>()? as f32,
-                    other => return Err(syn::Error::new_spanned(other, "epsilon must be a number")),
+                    other => {
+                        return Err(syn::Error::new_spanned(other, "epsilon must be a number"))
+                    }
                 });
             } else {
-                return Err(meta.error("unsupported #[simconnect(...)] key (expected name/units/epsilon)"));
+                return Err(
+                    meta.error("unsupported #[simconnect(...)] key (expected name/units/epsilon)")
+                );
             }
             Ok(())
         })?;
@@ -236,7 +240,11 @@ fn map_type(type_name: &str, ident: &syn::Ident) -> syn::Result<TypeMapping> {
         "Waypoint" => structural!(Waypoint, ::simconnect::proto::data::Waypoint, infallible),
         "LatLonAlt" => structural!(LatLonAlt, ::simconnect::proto::data::LatLonAlt, infallible),
         "Xyz" => structural!(Xyz, ::simconnect::proto::data::Xyz, infallible),
-        "MarkerState" => structural!(MarkerState, ::simconnect::proto::data::MarkerState, fallible),
+        "MarkerState" => structural!(
+            MarkerState,
+            ::simconnect::proto::data::MarkerState,
+            fallible
+        ),
         "Bco16" => bcd!(::simconnect::proto::bcd::Bco16, "BCO16"),
         "FrequencyBcd16" => bcd!(::simconnect::proto::bcd::FrequencyBcd16, "Frequency BCD16"),
         other => {

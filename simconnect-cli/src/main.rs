@@ -17,13 +17,15 @@ async fn main() {
             if let Some(port) = env::args().nth(1) {
                 eprintln!("retrying over TCP on 127.0.0.1:{port}");
                 match port.parse() {
-                    Ok(port) => match simconnect::SimConnect::open_tcp(app_name, "127.0.0.1", port).await {
-                        Ok(sim) => sim,
-                        Err(e) => {
-                            eprintln!("TCP connection also failed: {e}");
-                            std::process::exit(1);
+                    Ok(port) => {
+                        match simconnect::SimConnect::open_tcp(app_name, "127.0.0.1", port).await {
+                            Ok(sim) => sim,
+                            Err(e) => {
+                                eprintln!("TCP connection also failed: {e}");
+                                std::process::exit(1);
+                            }
                         }
-                    },
+                    }
                     Err(_) => {
                         eprintln!("invalid port argument");
                         std::process::exit(1);
@@ -55,7 +57,11 @@ async fn main() {
 
     for _ in 0..5 {
         match sim.recv().await {
-            Ok(packet) => println!("received {} bytes: {:02x?}", packet.len(), &packet[..packet.len().min(32)]),
+            Ok(packet) => println!(
+                "received {} bytes: {:02x?}",
+                packet.len(),
+                &packet[..packet.len().min(32)]
+            ),
             Err(e) => {
                 eprintln!("recv error: {e}");
                 break;

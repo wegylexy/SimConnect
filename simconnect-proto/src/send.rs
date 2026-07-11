@@ -489,10 +489,7 @@ pub fn subscribe_to_facilities(
     facility_list_type: u32,
     request_id: u32,
 ) -> PacketWriter {
-    let mut w = PacketWriter::new(
-        opcode::kittyhawk::SUBSCRIBE_TO_FACILITIES,
-        protocol_version,
-    );
+    let mut w = PacketWriter::new(opcode::kittyhawk::SUBSCRIBE_TO_FACILITIES, protocol_version);
     w.u32(facility_list_type).u32(request_id);
     w
 }
