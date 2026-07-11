@@ -20,7 +20,7 @@ use std::io;
 use std::sync::Arc;
 
 use simconnect_proto::enums::{
-    DataRequestFlags, DataSetFlags, DataType, EventFlags, Period, SimObjectType,
+    group_priority, DataRequestFlags, DataSetFlags, DataType, EventFlags, Period, SimObjectType,
 };
 use simconnect_proto::events;
 use simconnect_proto::protocol::ProtocolVersion;
@@ -316,6 +316,111 @@ impl SimConnect {
         .await
     }
 
+    /// Opcodes/layout for the whole ClientData API are cross-confirmed by
+    /// two independent reimplementations agreeing exactly, and
+    /// live-confirmed against a real MSFS2024 instance — see
+    /// `simconnect_proto::send`'s `map_client_data_name_to_id` doc comment.
+    pub async fn map_client_data_name_to_id(
+        &self,
+        client_data_name: &str,
+        client_data_id: u32,
+    ) -> Result<u32, ClientError> {
+        let packet = simconnect_proto::send::map_client_data_name_to_id(
+            self.connection.protocol_version_wire(),
+            client_data_name,
+            client_data_id,
+        )?;
+        Ok(self.connection.send(packet).await?)
+    }
+
+    pub async fn create_client_data(
+        &self,
+        client_data_id: u32,
+        size: u32,
+        read_only: bool,
+    ) -> io::Result<u32> {
+        let packet = simconnect_proto::send::create_client_data(
+            self.connection.protocol_version_wire(),
+            client_data_id,
+            size,
+            read_only,
+        );
+        self.connection.send(packet).await
+    }
+
+    pub async fn add_to_client_data_definition(
+        &self,
+        define_id: u32,
+        offset: u32,
+        size_or_type: u32,
+        epsilon: f32,
+        datum_id: u32,
+    ) -> io::Result<u32> {
+        let packet = simconnect_proto::send::add_to_client_data_definition(
+            self.connection.protocol_version_wire(),
+            define_id,
+            offset,
+            size_or_type,
+            epsilon,
+            datum_id,
+        );
+        self.connection.send(packet).await
+    }
+
+    pub async fn clear_client_data_definition(&self, define_id: u32) -> io::Result<u32> {
+        let packet = simconnect_proto::send::clear_client_data_definition(
+            self.connection.protocol_version_wire(),
+            define_id,
+        );
+        self.connection.send(packet).await
+    }
+
+    pub async fn request_client_data(
+        &self,
+        client_data_id: u32,
+        request_id: u32,
+        define_id: u32,
+        period: Period,
+        flags: DataRequestFlags,
+        origin: u32,
+        interval: u32,
+        limit: u32,
+    ) -> io::Result<u32> {
+        let packet = simconnect_proto::send::request_client_data(
+            self.connection.protocol_version_wire(),
+            client_data_id,
+            request_id,
+            define_id,
+            period,
+            flags,
+            origin,
+            interval,
+            limit,
+        );
+        self.connection.send(packet).await
+    }
+
+    /// `array_count`/`unit_size` follow the same convention as
+    /// [`Self::set_data_on_sim_object`] — see that method's doc comment.
+    pub async fn set_client_data(
+        &self,
+        client_data_id: u32,
+        define_id: u32,
+        array_count: u32,
+        unit_size: u32,
+        data: &[u8],
+    ) -> io::Result<u32> {
+        let packet = simconnect_proto::send::set_client_data(
+            self.connection.protocol_version_wire(),
+            client_data_id,
+            define_id,
+            array_count,
+            unit_size,
+            data,
+        );
+        self.connection.send(packet).await
+    }
+
     pub async fn request_data_on_sim_object(
         &self,
         request_id: u32,
@@ -397,8 +502,8 @@ impl SimConnect {
         Ok(self.connection.send(packet).await?)
     }
 
-    pub async fn unsubscribe_to_system_event(&self, event_id: u32) -> io::Result<u32> {
-        let packet = simconnect_proto::send::unsubscribe_to_system_event(
+    pub async fn unsubscribe_from_system_event(&self, event_id: u32) -> io::Result<u32> {
+        let packet = simconnect_proto::send::unsubscribe_from_system_event(
             self.connection.protocol_version_wire(),
             event_id,
         );
@@ -491,6 +596,62 @@ impl SimConnect {
             self.connection.protocol_version_wire(),
             container_title,
             init_position,
+            request_id,
+        )?;
+        Ok(self.connection.send(packet).await?)
+    }
+
+    /// MSFS2024 `_EX1` variant of [`Self::ai_create_simulated_object`],
+    /// adding a `livery` parameter for modular SimObjects. Opcode/layout
+    /// cross-confirmed against an independent reimplementation, and
+    /// live-confirmed against a real MSFS2024 instance: called with the
+    /// user's own aircraft title and an empty livery string, it returned a
+    /// genuine `RECV_ID::AssignedObjectId` (not an exception), and the
+    /// resulting object was cleaned up successfully with
+    /// [`Self::ai_remove_object`].
+    #[cfg(feature = "sunrise")]
+    pub async fn ai_create_simulated_object_ex1(
+        &self,
+        container_title: &str,
+        livery: &str,
+        init_position: &simconnect_proto::data::InitPosition,
+        request_id: u32,
+    ) -> Result<u32, ClientError> {
+        let packet = simconnect_proto::send::ai_create_simulated_object_ex1(
+            self.connection.protocol_version_wire(),
+            container_title,
+            livery,
+            init_position,
+            request_id,
+        )?;
+        Ok(self.connection.send(packet).await?)
+    }
+
+    /// MSFS2024 `_EX1` variant of [`Self::ai_create_enroute_atc_aircraft`],
+    /// adding a `livery` parameter. Opcode/layout cross-confirmed against an
+    /// independent reimplementation, not yet verified against a live sim
+    /// capture by this crate.
+    #[cfg(feature = "sunrise")]
+    pub async fn ai_create_enroute_atc_aircraft_ex1(
+        &self,
+        container_title: &str,
+        livery: &str,
+        tail_number: &str,
+        flight_number: i32,
+        flight_plan_path: &str,
+        flight_plan_position: f64,
+        touch_and_go: bool,
+        request_id: u32,
+    ) -> Result<u32, ClientError> {
+        let packet = simconnect_proto::send::ai_create_enroute_atc_aircraft_ex1(
+            self.connection.protocol_version_wire(),
+            container_title,
+            livery,
+            tail_number,
+            flight_number,
+            flight_plan_path,
+            flight_plan_position,
+            touch_and_go,
             request_id,
         )?;
         Ok(self.connection.send(packet).await?)
@@ -604,6 +765,14 @@ impl SimConnect {
     /// force this path regardless of the negotiated protocol version.
     /// `event_id` is the client-side id to map the event name to (caller's
     /// choice, must be unique per mapped event on this connection).
+    ///
+    /// Transmits with `EventFlags::GROUP_ID_IS_PRIORITY` and
+    /// `group_priority::HIGHEST` as the group id — live-confirmed
+    /// necessary: passing group `0` with no flags (this method's original
+    /// implementation) gets a silent `RECV_EXCEPTION::UnrecognizedId`,
+    /// because group `0` was never actually created via
+    /// `AddClientEventToNotificationGroup`. The priority-flag form bypasses
+    /// needing a real notification group at all.
     pub async fn set_com_frequency_hz(
         &self,
         radio: ComRadio,
@@ -613,7 +782,13 @@ impl SimConnect {
         self.map_client_event_to_sim_event(event_id, radio.hz_event_name())
             .await?;
         Ok(self
-            .transmit_client_event(0, event_id, hz as i32, 0, EventFlags::empty())
+            .transmit_client_event(
+                0,
+                event_id,
+                hz as i32,
+                group_priority::HIGHEST,
+                EventFlags::GROUP_ID_IS_PRIORITY,
+            )
             .await?)
     }
 
@@ -623,6 +798,10 @@ impl SimConnect {
     /// this path (e.g. an old aircraft/gauge that only listens for
     /// `COM_RADIO_SET` even on a modern sim). Loses precision on 8.33 kHz
     /// channels; see [`FrequencyBcd16`]'s docs.
+    ///
+    /// See [`Self::set_com_frequency_hz`]'s doc comment for why this
+    /// transmits with `EventFlags::GROUP_ID_IS_PRIORITY` +
+    /// `group_priority::HIGHEST` rather than group `0`/no flags.
     pub async fn set_com_frequency_bcd16(
         &self,
         radio: ComRadio,
@@ -633,7 +812,13 @@ impl SimConnect {
             .await?;
         let bcd = FrequencyBcd16::from_khz(khz).0;
         Ok(self
-            .transmit_client_event(0, event_id, bcd as i32, 0, EventFlags::empty())
+            .transmit_client_event(
+                0,
+                event_id,
+                bcd as i32,
+                group_priority::HIGHEST,
+                EventFlags::GROUP_ID_IS_PRIORITY,
+            )
             .await?)
     }
 
@@ -658,6 +843,22 @@ impl SimConnect {
         request_id: u32,
     ) -> io::Result<u32> {
         let packet = simconnect_proto::send::subscribe_to_facilities(
+            self.connection.protocol_version_wire(),
+            facility_list_type,
+            request_id,
+        );
+        self.connection.send(packet).await
+    }
+
+    /// Legacy FSX-era facility list request — see
+    /// `simconnect_proto::send::request_facilities_list`'s doc comment for
+    /// how its opcode/layout were captured.
+    pub async fn request_facilities_list(
+        &self,
+        facility_list_type: u32,
+        request_id: u32,
+    ) -> io::Result<u32> {
+        let packet = simconnect_proto::send::request_facilities_list(
             self.connection.protocol_version_wire(),
             facility_list_type,
             request_id,
@@ -706,13 +907,11 @@ impl SimConnect {
     #[cfg(feature = "kittyhawk")]
     pub async fn request_jetway_data(
         &self,
-        request_id: u32,
         airport_icao: &str,
         parking_indices: &[i32],
     ) -> Result<u32, ClientError> {
         let packet = simconnect_proto::send::request_jetway_data(
             self.connection.protocol_version_wire(),
-            request_id,
             airport_icao,
             parking_indices,
         )?;
@@ -750,6 +949,283 @@ impl SimConnect {
             self.connection.protocol_version_wire(),
             input_event_hash,
             value,
+        );
+        self.connection.send(packet).await
+    }
+
+    /// Opcode/layout ground-truthed — see
+    /// `simconnect_proto::send::subscribe_to_flow_event`.
+    #[cfg(feature = "sunrise")]
+    pub async fn subscribe_to_flow_event(&self) -> io::Result<u32> {
+        let packet =
+            simconnect_proto::send::subscribe_to_flow_event(self.connection.protocol_version_wire());
+        self.connection.send(packet).await
+    }
+
+    #[cfg(feature = "kittyhawk")]
+    pub async fn get_input_event(&self, request_id: u32, hash: u64) -> io::Result<u32> {
+        let packet = simconnect_proto::send::get_input_event(
+            self.connection.protocol_version_wire(),
+            request_id,
+            hash,
+        );
+        self.connection.send(packet).await
+    }
+
+    #[cfg(feature = "kittyhawk")]
+    pub async fn enumerate_input_event_params(&self, hash: u64) -> io::Result<u32> {
+        let packet = simconnect_proto::send::enumerate_input_event_params(
+            self.connection.protocol_version_wire(),
+            hash,
+        );
+        self.connection.send(packet).await
+    }
+
+    pub async fn request_system_state(
+        &self,
+        request_id: u32,
+        state: &str,
+    ) -> Result<u32, ClientError> {
+        let packet = simconnect_proto::send::request_system_state(
+            self.connection.protocol_version_wire(),
+            request_id,
+            state,
+        )?;
+        Ok(self.connection.send(packet).await?)
+    }
+
+    pub async fn set_system_state(
+        &self,
+        state: &str,
+        integer: u32,
+        float: f32,
+        string: &str,
+    ) -> Result<u32, ClientError> {
+        let packet = simconnect_proto::send::set_system_state(
+            self.connection.protocol_version_wire(),
+            state,
+            integer,
+            float,
+            string,
+        )?;
+        Ok(self.connection.send(packet).await?)
+    }
+
+    /// The counterpart to [`Self::subscribe_to_facilities`] — opcode
+    /// ground-truthed.
+    #[cfg(feature = "kittyhawk")]
+    pub async fn unsubscribe_to_facilities(&self, facility_list_type: u32) -> io::Result<u32> {
+        let packet = simconnect_proto::send::unsubscribe_to_facilities(
+            self.connection.protocol_version_wire(),
+            facility_list_type,
+        );
+        self.connection.send(packet).await
+    }
+
+    pub async fn request_reserved_key(
+        &self,
+        event_id: u32,
+        key_choice_1: &str,
+        key_choice_2: &str,
+        key_choice_3: &str,
+    ) -> Result<u32, ClientError> {
+        let packet = simconnect_proto::send::request_reserved_key(
+            self.connection.protocol_version_wire(),
+            event_id,
+            key_choice_1,
+            key_choice_2,
+            key_choice_3,
+        )?;
+        Ok(self.connection.send(packet).await?)
+    }
+
+    pub async fn remove_input_event(
+        &self,
+        group_id: u32,
+        input_definition: &str,
+    ) -> Result<u32, ClientError> {
+        let packet = simconnect_proto::send::remove_input_event(
+            self.connection.protocol_version_wire(),
+            group_id,
+            input_definition,
+        )?;
+        Ok(self.connection.send(packet).await?)
+    }
+
+    #[cfg(feature = "sunrise")]
+    pub async fn camera_acquire(&self, client_id: &str) -> Result<u32, ClientError> {
+        let packet = simconnect_proto::send::camera_acquire(
+            self.connection.protocol_version_wire(),
+            client_id,
+        )?;
+        Ok(self.connection.send(packet).await?)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn camera_set_relative_6dof(
+        &self,
+        delta_x: f32,
+        delta_y: f32,
+        delta_z: f32,
+        pitch_deg: f32,
+        bank_deg: f32,
+        heading_deg: f32,
+    ) -> io::Result<u32> {
+        let packet = simconnect_proto::send::camera_set_relative_6dof(
+            self.connection.protocol_version_wire(),
+            delta_x,
+            delta_y,
+            delta_z,
+            pitch_deg,
+            bank_deg,
+            heading_deg,
+        );
+        self.connection.send(packet).await
+    }
+
+    #[cfg(feature = "sunrise")]
+    pub async fn subscribe_to_comm_bus_event(
+        &self,
+        event_id: u32,
+        event_name: &str,
+    ) -> Result<u32, ClientError> {
+        let packet = simconnect_proto::send::subscribe_to_comm_bus_event(
+            self.connection.protocol_version_wire(),
+            event_id,
+            event_name,
+        )?;
+        Ok(self.connection.send(packet).await?)
+    }
+
+    #[cfg(feature = "sunrise")]
+    pub async fn call_comm_bus_event(
+        &self,
+        event_name: &str,
+        broadcast_to: u32,
+        data: &[u8],
+    ) -> Result<u32, ClientError> {
+        let packet = simconnect_proto::send::call_comm_bus_event(
+            self.connection.protocol_version_wire(),
+            event_name,
+            broadcast_to,
+            data,
+        )?;
+        Ok(self.connection.send(packet).await?)
+    }
+
+    pub async fn menu_add_item(
+        &self,
+        menu_item: &str,
+        menu_event_id: u32,
+        data: u32,
+    ) -> Result<u32, ClientError> {
+        let packet = simconnect_proto::send::menu_add_item(
+            self.connection.protocol_version_wire(),
+            menu_item,
+            menu_event_id,
+            data,
+        )?;
+        Ok(self.connection.send(packet).await?)
+    }
+
+    /// `_EX1` variant of [`Self::request_facilities_list`] — opcode
+    /// ground-truthed.
+    #[cfg(feature = "kittyhawk")]
+    pub async fn request_facilities_list_ex1(
+        &self,
+        facility_list_type: u32,
+        request_id: u32,
+    ) -> io::Result<u32> {
+        let packet = simconnect_proto::send::request_facilities_list_ex1(
+            self.connection.protocol_version_wire(),
+            facility_list_type,
+            request_id,
+        );
+        self.connection.send(packet).await
+    }
+
+    #[cfg(feature = "kittyhawk")]
+    pub async fn request_all_facilities(
+        &self,
+        facility_list_type: u32,
+        request_id: u32,
+    ) -> io::Result<u32> {
+        let packet = simconnect_proto::send::request_all_facilities(
+            self.connection.protocol_version_wire(),
+            facility_list_type,
+            request_id,
+        );
+        self.connection.send(packet).await
+    }
+
+    /// `_EX1` variant of [`Self::map_input_event_to_client_event`] — opcode
+    /// ground-truthed.
+    #[cfg(feature = "kittyhawk")]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn map_input_event_to_client_event_ex1(
+        &self,
+        group_id: u32,
+        input_definition: &str,
+        down_event_id: u32,
+        down_value: u32,
+        up_event_id: u32,
+        up_value: u32,
+        maskable: bool,
+    ) -> Result<u32, ClientError> {
+        let packet = simconnect_proto::send::map_input_event_to_client_event_ex1(
+            self.connection.protocol_version_wire(),
+            group_id,
+            input_definition,
+            down_event_id,
+            down_value,
+            up_event_id,
+            up_value,
+            maskable,
+        )?;
+        Ok(self.connection.send(packet).await?)
+    }
+
+    /// `_EX1` variant of [`Self::transmit_client_event`] — opcode
+    /// ground-truthed.
+    #[cfg(feature = "kittyhawk")]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn transmit_client_event_ex1(
+        &self,
+        object_id: u32,
+        event_id: u32,
+        group_id: u32,
+        flags: u32,
+        data0: u32,
+        data1: u32,
+        data2: u32,
+        data3: u32,
+        data4: u32,
+    ) -> io::Result<u32> {
+        let packet = simconnect_proto::send::transmit_client_event_ex1(
+            self.connection.protocol_version_wire(),
+            object_id,
+            event_id,
+            group_id,
+            flags,
+            data0,
+            data1,
+            data2,
+            data3,
+            data4,
+        );
+        self.connection.send(packet).await
+    }
+
+    #[cfg(feature = "sunrise")]
+    pub async fn enumerate_sim_objects_and_liveries(
+        &self,
+        request_id: u32,
+        object_type: u32,
+    ) -> io::Result<u32> {
+        let packet = simconnect_proto::send::enumerate_sim_objects_and_liveries(
+            self.connection.protocol_version_wire(),
+            request_id,
+            object_type,
         );
         self.connection.send(packet).await
     }

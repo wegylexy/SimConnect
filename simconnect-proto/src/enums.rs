@@ -3,26 +3,21 @@
 //! `RecvId` 0-26 covers the FSX-era message set, each value confirmed
 //! against a live sim capture at some point (`Open`/`Exception`/`Event`/
 //! `SimObjectData` explicitly, via the header-framing fix — see CLAUDE.md's
-//! wire-format gotcha #0). 27 is intentionally absent from the C API's own
-//! numbering (there's no `SIMCONNECT_RECV_ID` value 27 in the official
-//! enum, so this isn't a mistake here).
+//! wire-format gotcha #0).
 //!
-//! 28+ (`Pick` onward) are MSFS2020 additions, gated behind the
-//! `kittyhawk` feature. **Their discriminant values were originally
-//! guessed by declaration order and turned out to be wrong** — a live
-//! MSFS2024 capture found `enumerate_controllers`'s reply arriving as id
-//! `32` and `enumerate_input_events`'s as id `34` (not the guessed 34/36),
-//! and `request_facility_data`'s reply as id `28`/`29` (not the guessed
-//! 30/31), with no simple uniform offset relating old to new. `FacilityData`,
-//! `FacilityDataEnd`, `ControllersList`, and `EnumerateInputEvents` below
-//! carry the corrected, live-confirmed values; `Pick`, `EventEx1`,
-//! `FacilityMinimalList`, and `JetwayData` still carry unconfirmed
-//! placeholder values (chosen only to avoid colliding with the confirmed
-//! ones) and are excluded from [`RecvId::from_u32`] for that reason — see
-//! GAPS.md. The official SDK's `SIMCONNECT_RECV_ID` has grown to 39+
-//! members as of MSFS 2020/2024; `GetInputEvent`, `SubscribeInputEvent`,
-//! `EnumerateInputEventParams`, and MSFS 2024's `FlowEvent` remain
-//! unimplemented.
+//! 27+ (`EventEx1` onward) are MSFS2020/2024 additions, gated behind the
+//! `kittyhawk`/`sunrise` features. **Their discriminant values were
+//! originally guessed by declaration order and turned out to be wrong** — a
+//! live MSFS2024 capture found `enumerate_controllers`'s reply arriving as
+//! id `32` and `enumerate_input_events`'s as id `34` (not the guessed
+//! 34/36), and `request_facility_data`'s reply as id `28`/`29` (not the
+//! guessed 30/31), with no simple uniform offset relating old to new.
+//! Every discriminant from `EventEx1` (27) through `CameraWorldLocker` (44)
+//! is now ground-truthed rather than guessed or cross-referenced — it
+//! exactly matches every value this crate had already live-confirmed
+//! (`FacilityData`=28, `FacilityDataEnd`=29, `ControllersList`=32,
+//! `EnumerateInputEvents`=34) and confirms there is no `Pick` variant at
+//! all, contrary to this crate's original declaration-order guess.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u32)]
@@ -54,55 +49,106 @@ pub enum RecvId {
     EventMultiplayerSessionEnded,
     EventRaceEnd,
     EventRaceLap,
-    /// Live-confirmed at wire value 28 (`request_facility_data`'s reply).
+    /// Supersedes this crate's own earlier declaration-order guess, which
+    /// had assumed a `Pick` variant at 30; no such variant exists.
+    #[cfg(feature = "kittyhawk")]
+    EventEx1 = 27,
+    /// Separately live-confirmed (`request_facility_data`'s reply).
     #[cfg(feature = "kittyhawk")]
     FacilityData = 28,
-    /// Live-confirmed at wire value 29.
+    /// Separately live-confirmed.
     #[cfg(feature = "kittyhawk")]
     FacilityDataEnd = 29,
-    /// Unconfirmed placeholder — see this module's doc comment.
     #[cfg(feature = "kittyhawk")]
-    Pick = 30,
-    /// Unconfirmed placeholder — see this module's doc comment.
+    FacilityMinimalList = 30,
     #[cfg(feature = "kittyhawk")]
-    EventEx1 = 31,
-    /// Live-confirmed at wire value 32 (`enumerate_controllers`'s reply).
+    JetwayData = 31,
+    /// Separately live-confirmed (`enumerate_controllers`'s reply).
     #[cfg(feature = "kittyhawk")]
     ControllersList = 32,
-    /// Unconfirmed placeholder — see this module's doc comment.
     #[cfg(feature = "kittyhawk")]
-    JetwayData = 33,
-    /// Live-confirmed at wire value 34 (`enumerate_input_events`'s reply).
+    ActionCallback = 33,
+    /// Separately live-confirmed (`enumerate_input_events`'s reply).
     #[cfg(feature = "kittyhawk")]
     EnumerateInputEvents = 34,
-    /// Unconfirmed placeholder — see this module's doc comment.
+    /// No send builder/decode support yet — see GAPS.md.
     #[cfg(feature = "kittyhawk")]
-    ActionCallback = 35,
-    /// Unconfirmed placeholder — see this module's doc comment.
+    GetInputEvent = 35,
     #[cfg(feature = "kittyhawk")]
-    FacilityMinimalList = 36,
+    SubscribeInputEvent = 36,
+    /// No send builder/decode support yet — see GAPS.md.
+    #[cfg(feature = "kittyhawk")]
+    EnumerateInputEventParams = 37,
+    /// MSFS2024 addition, ground-truthed alongside the rest of this range.
+    /// No decode support yet.
+    #[cfg(feature = "sunrise")]
+    EnumerateSimobjectAndLiveryList = 38,
+    /// `subscribe_to_flow_event`'s reply — no decode support yet, and as of
+    /// this writing the send side itself is only documented in Microsoft's
+    /// unreleased `/flighting/` (beta) doc tree, not the stable docs.
+    #[cfg(feature = "sunrise")]
+    FlowEvent = 39,
+    /// Camera API. No send builder/decode support yet — see GAPS.md.
+    #[cfg(feature = "sunrise")]
+    CameraData = 40,
+    #[cfg(feature = "sunrise")]
+    CameraStatus = 41,
+    #[cfg(feature = "sunrise")]
+    CameraDefinitionList = 42,
+    /// CommBus — WASM/JS-gauge ↔ SimConnect-client messaging. No send
+    /// builder/decode support yet.
+    #[cfg(feature = "sunrise")]
+    CommBus = 43,
+    #[cfg(feature = "sunrise")]
+    CameraWorldLocker = 44,
 }
 
 impl RecvId {
-    /// Only recognizes discriminants this crate has actually confirmed
-    /// against a live sim capture (0-26 unconditionally; with `kittyhawk`,
-    /// also 28/29/32/34 — see this module's doc comment). Deliberately
-    /// does *not* recognize `Pick`/`EventEx1`/`JetwayData`/
-    /// `FacilityMinimalList`'s placeholder values: those haven't been
-    /// confirmed, so treating their guessed numbers as recognized would
-    /// let an uncorrelated wire value silently dispatch to the wrong
-    /// decoder instead of falling through as unrecognized.
+    /// Recognizes every discriminant this crate declares: 0-26
+    /// unconditionally (live-confirmed), and with `kittyhawk`/`sunrise`,
+    /// 27-44 — all ground-truthed, not a guess (see this module's doc
+    /// comment), so there's no risk of misdispatching an uncorrelated wire
+    /// value the way there was when 27+ were only declaration-order
+    /// guesses.
     pub fn from_u32(value: u32) -> Option<Self> {
         match value {
             0..=26 => Some(unsafe { core::mem::transmute::<u32, Self>(value) }),
+            #[cfg(feature = "kittyhawk")]
+            27 => Some(Self::EventEx1),
             #[cfg(feature = "kittyhawk")]
             28 => Some(Self::FacilityData),
             #[cfg(feature = "kittyhawk")]
             29 => Some(Self::FacilityDataEnd),
             #[cfg(feature = "kittyhawk")]
+            30 => Some(Self::FacilityMinimalList),
+            #[cfg(feature = "kittyhawk")]
+            31 => Some(Self::JetwayData),
+            #[cfg(feature = "kittyhawk")]
             32 => Some(Self::ControllersList),
             #[cfg(feature = "kittyhawk")]
+            33 => Some(Self::ActionCallback),
+            #[cfg(feature = "kittyhawk")]
             34 => Some(Self::EnumerateInputEvents),
+            #[cfg(feature = "kittyhawk")]
+            35 => Some(Self::GetInputEvent),
+            #[cfg(feature = "kittyhawk")]
+            36 => Some(Self::SubscribeInputEvent),
+            #[cfg(feature = "kittyhawk")]
+            37 => Some(Self::EnumerateInputEventParams),
+            #[cfg(feature = "sunrise")]
+            38 => Some(Self::EnumerateSimobjectAndLiveryList),
+            #[cfg(feature = "sunrise")]
+            39 => Some(Self::FlowEvent),
+            #[cfg(feature = "sunrise")]
+            40 => Some(Self::CameraData),
+            #[cfg(feature = "sunrise")]
+            41 => Some(Self::CameraStatus),
+            #[cfg(feature = "sunrise")]
+            42 => Some(Self::CameraDefinitionList),
+            #[cfg(feature = "sunrise")]
+            43 => Some(Self::CommBus),
+            #[cfg(feature = "sunrise")]
+            44 => Some(Self::CameraWorldLocker),
             _ => None,
         }
     }
@@ -128,6 +174,35 @@ pub enum DataType {
     Waypoint,
     LatLonAlt,
     Xyz,
+}
+
+impl DataType {
+    /// Fixed wire byte width of a field of this type — `None` for
+    /// `Invalid`/`StringV`, which have no fixed width (`StringV` is
+    /// variable-length and null-terminated, so it can't be placed at a
+    /// static byte offset the way a ClientData definition requires).
+    pub const fn byte_width(self) -> Option<u32> {
+        match self {
+            Self::Invalid | Self::StringV => None,
+            Self::Int32 | Self::Float32 => Some(4),
+            Self::Int64 | Self::Float64 => Some(8),
+            Self::String8 => Some(8),
+            Self::String32 => Some(32),
+            Self::String64 => Some(64),
+            Self::String128 => Some(128),
+            Self::String256 => Some(256),
+            Self::String260 => Some(260),
+            // 6 f64 (lat/lon/alt/pitch/bank/heading) + 2 u32 (on_ground/airspeed).
+            Self::InitPosition => Some(6 * 8 + 2 * 4),
+            // 64-byte fixed name + u32 state.
+            Self::MarkerState => Some(64 + 4),
+            // lat, lon, alt (f64) + flags (u32) + speed, throttle (f64) —
+            // see `crate::data::Waypoint`.
+            Self::Waypoint => Some(3 * 8 + 4 + 2 * 8),
+            Self::LatLonAlt => Some(3 * 8),
+            Self::Xyz => Some(3 * 8),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -171,11 +246,23 @@ pub enum SimConnectException {
     ObjectAi,
     ObjectAtc,
     ObjectSchedule,
+    /// Ground-truthed live: this is what a real MSFS2024 instance actually
+    /// returns for a malformed/rejected `request_jetway_data` call — not
+    /// the generic `SizeMismatch` this crate's code once assumed.
+    JetwayData,
+    ActionNotFound,
+    NotAnAction,
+    IncorrectActionParams,
+    GetInputEventFailed,
+    SetInputEventFailed,
+    EventNameReserved,
+    Internal,
+    CameraApi,
 }
 
 impl SimConnectException {
     pub fn from_u32(value: u32) -> Option<Self> {
-        if value <= Self::ObjectSchedule as u32 {
+        if value <= Self::CameraApi as u32 {
             // SAFETY: `SimConnectException` is `#[repr(u32)]` and contiguous from 0.
             Some(unsafe { core::mem::transmute::<u32, Self>(value) })
         } else {

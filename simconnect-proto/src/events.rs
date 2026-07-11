@@ -26,7 +26,7 @@ pub const COM3_RADIO_SET: &str = "COM3_RADIO_SET";
 pub const COM3_RADIO_SET_HZ: &str = "COM3_RADIO_SET_HZ";
 
 /// Known SimConnect *system* event names — plain strings passed to
-/// `send::subscribe_to_system_event`/`unsubscribe_to_system_event`, not new
+/// `send::subscribe_to_system_event`/`unsubscribe_from_system_event`, not new
 /// opcodes or wire structures (unlike the client events above, these fire
 /// unprompted whenever the sim's own state changes, not in response to a
 /// `transmit_client_event` call). The `RecvEvent` a subscription produces
@@ -60,7 +60,11 @@ pub mod system {
     /// flight has started — MSFS keeps that flight/world session loaded
     /// behind the main menu rather than tearing it down, and counts that
     /// as the same kind of pause as pressing Esc mid-flight, even though
-    /// [`SIM`] reads `1` (running) in both menu states.
+    /// [`SIM`] reads `1` (running) in both menu states. The `0`/`OFF` case
+    /// extends to the "Ready to fly" gate screen for a freshly-loaded new
+    /// flight too (also separately confirmed live) — it's not just literal
+    /// app launch that reads unpaused, it's specifically "no flight has
+    /// been through its play/pause lifecycle yet".
     pub const PAUSE: &str = "Pause";
 
     /// Bitmask pause notification (see

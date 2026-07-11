@@ -237,9 +237,11 @@ movement
 
 MSFS2024 added `_EX1` variants of `AICreateSimulatedObject`/
 `AICreateEnrouteATCAircraft` (adding a livery parameter for modular
-SimObjects) — not implemented, since no wire opcode for them is sourced
-yet; the non-`_EX1` functions above are unaffected and work unchanged on
-MSFS2024.
+SimObjects) — both are implemented (`SimConnect::ai_create_simulated_object_ex1`/
+`ai_create_enroute_atc_aircraft_ex1`). `ai_create_simulated_object_ex1` is
+live-confirmed against a real sim; `ai_create_enroute_atc_aircraft_ex1`'s
+opcode is cross-confirmed against an independent reimplementation but not
+yet live-tested (see `GAPS.md`).
 
 ## System events
 

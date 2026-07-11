@@ -30,7 +30,15 @@ pub mod opcode {
     pub const SET_INPUT_GROUP_STATE: u32 = 0xF0000015;
     pub const REQUEST_RESERVED_KEY: u32 = 0xF0000016;
     pub const SUBSCRIBE_TO_SYSTEM_EVENT: u32 = 0xF0000017;
-    pub const UNSUBSCRIBE_TO_SYSTEM_EVENT: u32 = 0xF0000018;
+    pub const UNSUBSCRIBE_FROM_SYSTEM_EVENT: u32 = 0xF0000018;
+    /// Ground-truthed — not a guess or cross-reference. See
+    /// `request_facilities_list`'s doc comment. Every other opcode in this
+    /// file with a similar doc comment was confirmed the same way.
+    pub const REQUEST_FACILITIES_LIST: u32 = 0xF0000043;
+    pub const REQUEST_SYSTEM_STATE: u32 = 0xF0000035;
+    pub const SET_SYSTEM_STATE: u32 = 0xF0000036;
+    pub const MENU_ADD_ITEM: u32 = 0xF0000031;
+    pub const CAMERA_SET_RELATIVE_6DOF: u32 = 0xF0000030;
 
     /// AI object creation/control (FSX-era). Cross-confirmed two
     /// independent ways: these values fall exactly in the `0x1C`-`0x2F`
@@ -46,6 +54,21 @@ pub mod opcode {
     pub const AI_RELEASE_CONTROL: u32 = 0xF000002B;
     pub const AI_REMOVE_OBJECT: u32 = 0xF000002C;
     pub const AI_SET_AIRCRAFT_FLIGHT_PLAN: u32 = 0xF000002D;
+
+    /// MSFS2024 `_EX1` variants (add a `livery` parameter for modular
+    /// SimObjects). Values cross-confirmed against an independent
+    /// reimplementation, not copied code — this project is MIT and doesn't
+    /// cite or attribute any LGPL-licensed source, even for facts.
+    /// `AI_CREATE_SIMULATED_OBJECT_EX1` is live-confirmed against a real
+    /// MSFS2024 instance: sending it with the user's own aircraft title and
+    /// an empty livery string got back a genuine `RECV_ID::AssignedObjectId`
+    /// (the request id echoed correctly), and the resulting object was
+    /// successfully cleaned up with `ai_remove_object`.
+    /// `AI_CREATE_ENROUTE_ATC_AIRCRAFT_EX1` is not yet live-tested.
+    #[cfg(feature = "sunrise")]
+    pub const AI_CREATE_ENROUTE_ATC_AIRCRAFT_EX1: u32 = 0xF0000058;
+    #[cfg(feature = "sunrise")]
+    pub const AI_CREATE_SIMULATED_OBJECT_EX1: u32 = 0xF000005A;
 
     /// MSFS2020 additions. Values are `0xF0000000 | small_code`, where
     /// `small_code` is independently-observed wire-protocol behavior, not
@@ -63,7 +86,36 @@ pub mod opcode {
         pub const ENUMERATE_INPUT_EVENTS: u32 = 0xF000004F;
         pub const SET_INPUT_EVENT: u32 = 0xF0000051;
         pub const SUBSCRIBE_INPUT_EVENT: u32 = 0xF0000052;
+        pub const UNSUBSCRIBE_TO_FACILITIES: u32 = 0xF0000042;
+        pub const REQUEST_FACILITIES_LIST_EX1: u32 = 0xF0000049;
+        pub const REQUEST_ALL_FACILITIES: u32 = 0xF000005E;
+        pub const MAP_INPUT_EVENT_TO_CLIENT_EVENT_EX1: u32 = 0xF000004D;
+        pub const TRANSMIT_CLIENT_EVENT_EX1: u32 = 0xF0000044;
+        pub const GET_INPUT_EVENT: u32 = 0xF0000050;
+        pub const ENUMERATE_INPUT_EVENT_PARAMS: u32 = 0xF0000054;
     }
+
+    /// MSFS2024 additions. Values ground-truthed, not guessed.
+    #[cfg(feature = "sunrise")]
+    pub mod sunrise {
+        pub const SUBSCRIBE_TO_FLOW_EVENT: u32 = 0xF000005C;
+        pub const CAMERA_ACQUIRE: u32 = 0xF000005F;
+        pub const SUBSCRIBE_TO_COMM_BUS_EVENT: u32 = 0xF000006A;
+        pub const CALL_COMM_BUS_EVENT: u32 = 0xF000006C;
+        pub const ENUMERATE_SIMOBJECTS_AND_LIVERIES: u32 = 0xF000005B;
+    }
+
+    /// ClientData API (FSX-era — not gated behind `kittyhawk`). Values
+    /// cross-confirmed by two independent reimplementations agreeing
+    /// exactly, not copied code — this project is MIT and doesn't cite or
+    /// attribute any LGPL-licensed source, even for facts. Not yet verified
+    /// against a live sim capture by this crate.
+    pub const MAP_CLIENT_DATA_NAME_TO_ID: u32 = 0xF0000037;
+    pub const CREATE_CLIENT_DATA: u32 = 0xF0000038;
+    pub const ADD_TO_CLIENT_DATA_DEFINITION: u32 = 0xF0000039;
+    pub const CLEAR_CLIENT_DATA_DEFINITION: u32 = 0xF000003A;
+    pub const REQUEST_CLIENT_DATA: u32 = 0xF000003B;
+    pub const SET_CLIENT_DATA: u32 = 0xF000003C;
 }
 
 /// `SIMCONNECT_UNTAGGED` sentinel used as `datum_id` in `add_to_data_definition`.
@@ -189,6 +241,107 @@ pub fn add_to_data_definition(
 pub fn clear_data_definition(protocol_version: u32, define_id: u32) -> PacketWriter {
     let mut w = PacketWriter::new(opcode::CLEAR_DATA_DEFINITION, protocol_version);
     w.u32(define_id);
+    w
+}
+
+/// Maps a client-chosen name to a `client_data_id` the sim will recognize in
+/// later `ClientData` calls. Layout cross-confirmed by two independent
+/// reimplementations, and live-confirmed against a real MSFS2024 instance:
+/// this send, paired with `create_client_data`/`add_to_client_data_definition`/
+/// `request_client_data`, gets back a genuine `RECV_ID::ClientData` reply
+/// (not an exception).
+pub fn map_client_data_name_to_id(
+    protocol_version: u32,
+    client_data_name: &str,
+    client_data_id: u32,
+) -> Result<PacketWriter, FixedStringError> {
+    let mut w = PacketWriter::new(opcode::MAP_CLIENT_DATA_NAME_TO_ID, protocol_version);
+    w.fixed_str(256, client_data_name)?;
+    w.u32(client_data_id);
+    Ok(w)
+}
+
+/// Creates (or re-opens) a ClientData area of `size` bytes. `read_only`
+/// mirrors `SIMCONNECT_CREATE_CLIENT_DATA_FLAG_READ_ONLY`.
+pub fn create_client_data(
+    protocol_version: u32,
+    client_data_id: u32,
+    size: u32,
+    read_only: bool,
+) -> PacketWriter {
+    let mut w = PacketWriter::new(opcode::CREATE_CLIENT_DATA, protocol_version);
+    w.u32(client_data_id).u32(size).u32(read_only as u32);
+    w
+}
+
+/// Registers one field of a ClientData definition. `size_or_type` mirrors
+/// the official `SimConnect_AddToClientDataDefinition`'s overloaded
+/// `dwSizeOrType` parameter (either a byte count or a `SIMCONNECT_DATATYPE`
+/// discriminant).
+pub fn add_to_client_data_definition(
+    protocol_version: u32,
+    define_id: u32,
+    offset: u32,
+    size_or_type: u32,
+    epsilon: f32,
+    datum_id: u32,
+) -> PacketWriter {
+    let mut w = PacketWriter::new(opcode::ADD_TO_CLIENT_DATA_DEFINITION, protocol_version);
+    w.u32(define_id)
+        .u32(offset)
+        .u32(size_or_type)
+        .f32(epsilon)
+        .u32(datum_id);
+    w
+}
+
+pub fn clear_client_data_definition(protocol_version: u32, define_id: u32) -> PacketWriter {
+    let mut w = PacketWriter::new(opcode::CLEAR_CLIENT_DATA_DEFINITION, protocol_version);
+    w.u32(define_id);
+    w
+}
+
+pub fn request_client_data(
+    protocol_version: u32,
+    client_data_id: u32,
+    request_id: u32,
+    define_id: u32,
+    period: Period,
+    flags: DataRequestFlags,
+    origin: u32,
+    interval: u32,
+    limit: u32,
+) -> PacketWriter {
+    let mut w = PacketWriter::new(opcode::REQUEST_CLIENT_DATA, protocol_version);
+    w.u32(client_data_id)
+        .u32(request_id)
+        .u32(define_id)
+        .u32(period as u32)
+        .u32(flags.bits())
+        .u32(origin)
+        .u32(interval)
+        .u32(limit);
+    w
+}
+
+/// `data` is already-encoded per the field layout registered with
+/// `add_to_client_data_definition`, mirroring `set_data_on_sim_object`'s
+/// `array_count`/`unit_size` convention (see its doc comment).
+pub fn set_client_data(
+    protocol_version: u32,
+    client_data_id: u32,
+    define_id: u32,
+    array_count: u32,
+    unit_size: u32,
+    data: &[u8],
+) -> PacketWriter {
+    let mut w = PacketWriter::new(opcode::SET_CLIENT_DATA, protocol_version);
+    w.u32(client_data_id)
+        .u32(define_id)
+        .u32(0) // reserved
+        .u32(array_count)
+        .u32(unit_size)
+        .bytes(data);
     w
 }
 
@@ -321,8 +474,8 @@ pub fn subscribe_to_system_event(
     Ok(w)
 }
 
-pub fn unsubscribe_to_system_event(protocol_version: u32, event_id: u32) -> PacketWriter {
-    let mut w = PacketWriter::new(opcode::UNSUBSCRIBE_TO_SYSTEM_EVENT, protocol_version);
+pub fn unsubscribe_from_system_event(protocol_version: u32, event_id: u32) -> PacketWriter {
+    let mut w = PacketWriter::new(opcode::UNSUBSCRIBE_FROM_SYSTEM_EVENT, protocol_version);
     w.u32(event_id);
     w
 }
@@ -401,6 +554,55 @@ pub fn ai_create_simulated_object(
     let mut w = PacketWriter::new(opcode::AI_CREATE_SIMULATED_OBJECT, protocol_version);
     w.fixed_str(256, container_title)?;
     write_init_position(&mut w, init_position);
+    w.u32(request_id);
+    Ok(w)
+}
+
+/// MSFS2024 `_EX1` variant of [`ai_create_simulated_object`], adding a
+/// `livery` parameter (a modular SimObject's livery folder name). Layout
+/// cross-confirmed against an independent reimplementation, and
+/// live-confirmed against a real MSFS2024 instance (see
+/// `opcode::AI_CREATE_SIMULATED_OBJECT_EX1`'s doc comment).
+#[cfg(feature = "sunrise")]
+pub fn ai_create_simulated_object_ex1(
+    protocol_version: u32,
+    container_title: &str,
+    livery: &str,
+    init_position: &crate::data::InitPosition,
+    request_id: u32,
+) -> Result<PacketWriter, FixedStringError> {
+    let mut w = PacketWriter::new(opcode::AI_CREATE_SIMULATED_OBJECT_EX1, protocol_version);
+    w.fixed_str(256, container_title)?;
+    w.fixed_str(256, livery)?;
+    write_init_position(&mut w, init_position);
+    w.u32(request_id);
+    Ok(w)
+}
+
+/// MSFS2024 `_EX1` variant of [`ai_create_enroute_atc_aircraft`], adding a
+/// `livery` parameter. Layout cross-confirmed against an independent
+/// reimplementation; not yet verified against a live sim capture by this
+/// crate.
+#[cfg(feature = "sunrise")]
+pub fn ai_create_enroute_atc_aircraft_ex1(
+    protocol_version: u32,
+    container_title: &str,
+    livery: &str,
+    tail_number: &str,
+    flight_number: i32,
+    flight_plan_path: &str,
+    flight_plan_position: f64,
+    touch_and_go: bool,
+    request_id: u32,
+) -> Result<PacketWriter, FixedStringError> {
+    let mut w = PacketWriter::new(opcode::AI_CREATE_ENROUTE_ATC_AIRCRAFT_EX1, protocol_version);
+    w.fixed_str(256, container_title)?;
+    w.fixed_str(256, livery)?;
+    w.fixed_str(12, tail_number)?;
+    w.i32(flight_number);
+    w.fixed_str(260, flight_plan_path)?;
+    w.f64(flight_plan_position);
+    w.u32(touch_and_go as u32);
     w.u32(request_id);
     Ok(w)
 }
@@ -510,6 +712,27 @@ pub fn subscribe_to_facilities(
     w
 }
 
+/// Legacy FSX-era facility list request: gets back
+/// `RecvId::AirportList`/`VorList`/`NdbList`/`WaypointList` depending on
+/// `facility_list_type` (see `recv::parse_airport_list` etc.). Opcode and
+/// layout ground-truthed: the payload is exactly
+/// `facility_list_type`(`u32`) + `request_id`(`u32`), nothing else,
+/// matching the official function's declared parameter order exactly. Not
+/// gated behind `kittyhawk` — this is an FSX-era call (unlike its `_EX1`
+/// sibling and `SubscribeToFacilities`, both MSFS2020 additions).
+/// Live-confirmed against a real MSFS2024 instance: a call with
+/// `facility_list_type = 0` (airports) returned a genuine `AirportList`
+/// reply with plausible real airport data, decoded correctly.
+pub fn request_facilities_list(
+    protocol_version: u32,
+    facility_list_type: u32,
+    request_id: u32,
+) -> PacketWriter {
+    let mut w = PacketWriter::new(opcode::REQUEST_FACILITIES_LIST, protocol_version);
+    w.u32(facility_list_type).u32(request_id);
+    w
+}
+
 /// Requests facility data for one ICAO identifier using a facility
 /// definition already registered via [`add_to_facility_definition`].
 /// `icao`/`region` widths (16/4 bytes) per research into observed wire
@@ -553,16 +776,26 @@ pub fn request_facility_data_ex1(
 
 /// Requests jetway data for an airport, optionally restricted to specific
 /// parking indices (empty = all).
+///
+/// This crate's own six blind-guessed variants and a seventh re-derived
+/// from an independent reimplementation all failed live against real
+/// MSFS2024 with `RECV_EXCEPTION::SizeMismatch` — see GAPS.md. The real
+/// layout was finally pinned down by ground-truth verification:
+/// **20-byte icao** (every previous guess used 8/5/16/256), **no
+/// `request_id` field at all**, then `ArrayCount`(`u32`) and that many
+/// `i32` indices. Live-confirmed fully working against a real MSFS2024
+/// instance from an actual parked gate: returned a genuine
+/// `RecvId::JetwayData` reply (real entries, `airport_icao` echoed back
+/// exactly), decoded correctly by this module's existing
+/// `parse_jetway_data`.
 #[cfg(feature = "kittyhawk")]
 pub fn request_jetway_data(
     protocol_version: u32,
-    request_id: u32,
     airport_icao: &str,
     parking_indices: &[i32],
 ) -> Result<PacketWriter, FixedStringError> {
     let mut w = PacketWriter::new(opcode::kittyhawk::REQUEST_JETWAY_DATA, protocol_version);
-    w.u32(request_id);
-    w.fixed_str(8, airport_icao)?;
+    w.fixed_str(20, airport_icao)?;
     w.u32(parking_indices.len() as u32);
     for &i in parking_indices {
         w.i32(i);
@@ -602,6 +835,312 @@ pub fn set_input_event(protocol_version: u32, input_event_hash: u64, value: &[u8
 pub fn subscribe_input_event(protocol_version: u32, input_event_hash: u64) -> PacketWriter {
     let mut w = PacketWriter::new(opcode::kittyhawk::SUBSCRIBE_INPUT_EVENT, protocol_version);
     w.bytes(&input_event_hash.to_le_bytes());
+    w
+}
+
+/// Ground-truthed: no payload at all beyond the packet header.
+#[cfg(feature = "sunrise")]
+pub fn subscribe_to_flow_event(protocol_version: u32) -> PacketWriter {
+    PacketWriter::new(opcode::sunrise::SUBSCRIBE_TO_FLOW_EVENT, protocol_version)
+}
+
+/// Ground-truthed: `RequestID`(`u32`)
+/// then `Hash`(`u64`), matching `SimConnect_GetInputEvent(HANDLE,
+/// SIMCONNECT_DATA_REQUEST_ID RequestID, UINT64 Hash)`'s parameter order.
+#[cfg(feature = "kittyhawk")]
+pub fn get_input_event(protocol_version: u32, request_id: u32, hash: u64) -> PacketWriter {
+    let mut w = PacketWriter::new(opcode::kittyhawk::GET_INPUT_EVENT, protocol_version);
+    w.u32(request_id).u64(hash);
+    w
+}
+
+/// Ground-truthed: just `Hash`(`u64`), no
+/// request id — matching `SimConnect_EnumerateInputEventParams(HANDLE,
+/// UINT64 Hash)` exactly.
+#[cfg(feature = "kittyhawk")]
+pub fn enumerate_input_event_params(protocol_version: u32, hash: u64) -> PacketWriter {
+    let mut w = PacketWriter::new(
+        opcode::kittyhawk::ENUMERATE_INPUT_EVENT_PARAMS,
+        protocol_version,
+    );
+    w.u64(hash);
+    w
+}
+
+/// Ground-truthed: `RequestID`(`u32`)
+/// then a 256-byte fixed string for `szState`.
+pub fn request_system_state(
+    protocol_version: u32,
+    request_id: u32,
+    state: &str,
+) -> Result<PacketWriter, FixedStringError> {
+    let mut w = PacketWriter::new(opcode::REQUEST_SYSTEM_STATE, protocol_version);
+    w.u32(request_id);
+    w.fixed_str(256, state)?;
+    Ok(w)
+}
+
+/// Ground-truthed: 256-byte `szState`,
+/// then `dwInteger`(`u32`), `fFloat`(`f32`), then a 260-byte `szString` —
+/// matching `SimConnect_SetSystemState`'s parameter order exactly, with the
+/// two fixed string widths determined by total packet length (524-byte
+/// payload only divides evenly as 256+4+4+260, not the more common 256
+/// twice).
+pub fn set_system_state(
+    protocol_version: u32,
+    state: &str,
+    integer: u32,
+    float: f32,
+    string: &str,
+) -> Result<PacketWriter, FixedStringError> {
+    let mut w = PacketWriter::new(opcode::SET_SYSTEM_STATE, protocol_version);
+    w.fixed_str(256, state)?;
+    w.u32(integer).f32(float);
+    w.fixed_str(260, string)?;
+    Ok(w)
+}
+
+/// Ground-truthed: just
+/// `facility_list_type`(`u32`), the counterpart to `subscribe_to_facilities`.
+#[cfg(feature = "kittyhawk")]
+pub fn unsubscribe_to_facilities(protocol_version: u32, facility_list_type: u32) -> PacketWriter {
+    let mut w = PacketWriter::new(
+        opcode::kittyhawk::UNSUBSCRIBE_TO_FACILITIES,
+        protocol_version,
+    );
+    w.u32(facility_list_type);
+    w
+}
+
+/// Ground-truthed: `EventID`(`u32`) then
+/// three 30-byte fixed strings for the key choices — a narrower width than
+/// every other fixed string in this crate, confirmed exactly by total
+/// packet length (94-byte payload = 4 + 3×30) and by the three key-choice
+/// strings landing at offsets 30 bytes apart in the captured bytes.
+pub fn request_reserved_key(
+    protocol_version: u32,
+    event_id: u32,
+    key_choice_1: &str,
+    key_choice_2: &str,
+    key_choice_3: &str,
+) -> Result<PacketWriter, FixedStringError> {
+    let mut w = PacketWriter::new(opcode::REQUEST_RESERVED_KEY, protocol_version);
+    w.u32(event_id);
+    w.fixed_str(30, key_choice_1)?;
+    w.fixed_str(30, key_choice_2)?;
+    w.fixed_str(30, key_choice_3)?;
+    Ok(w)
+}
+
+/// Ground-truthed: `GroupID`(`u32`) then
+/// a 256-byte fixed string for `szInputDefinition`.
+pub fn remove_input_event(
+    protocol_version: u32,
+    group_id: u32,
+    input_definition: &str,
+) -> Result<PacketWriter, FixedStringError> {
+    let mut w = PacketWriter::new(opcode::REMOVE_INPUT_EVENT, protocol_version);
+    w.u32(group_id);
+    w.fixed_str(256, input_definition)?;
+    Ok(w)
+}
+
+/// Ground-truthed: a single, unusually
+/// wide 2048-byte fixed string for `ClientId` — confirmed by total packet
+/// length (2048-byte payload for one string parameter).
+#[cfg(feature = "sunrise")]
+pub fn camera_acquire(
+    protocol_version: u32,
+    client_id: &str,
+) -> Result<PacketWriter, FixedStringError> {
+    let mut w = PacketWriter::new(opcode::sunrise::CAMERA_ACQUIRE, protocol_version);
+    w.fixed_str(2048, client_id)?;
+    Ok(w)
+}
+
+/// Ground-truthed: six `f32`s in
+/// declaration order (`fDeltaX/Y/Z`, `fPitchDeg`, `fBankDeg`,
+/// `fHeadingDeg`) — every value in the captured packet matched the exact
+/// floats this verification pass passed in.
+pub fn camera_set_relative_6dof(
+    protocol_version: u32,
+    delta_x: f32,
+    delta_y: f32,
+    delta_z: f32,
+    pitch_deg: f32,
+    bank_deg: f32,
+    heading_deg: f32,
+) -> PacketWriter {
+    let mut w = PacketWriter::new(opcode::CAMERA_SET_RELATIVE_6DOF, protocol_version);
+    w.f32(delta_x)
+        .f32(delta_y)
+        .f32(delta_z)
+        .f32(pitch_deg)
+        .f32(bank_deg)
+        .f32(heading_deg);
+    w
+}
+
+/// Ground-truthed: `EventID`(`u32`) then
+/// a 256-byte fixed string for `EventName`.
+#[cfg(feature = "sunrise")]
+pub fn subscribe_to_comm_bus_event(
+    protocol_version: u32,
+    event_id: u32,
+    event_name: &str,
+) -> Result<PacketWriter, FixedStringError> {
+    let mut w = PacketWriter::new(opcode::sunrise::SUBSCRIBE_TO_COMM_BUS_EVENT, protocol_version);
+    w.u32(event_id);
+    w.fixed_str(256, event_name)?;
+    Ok(w)
+}
+
+/// Ground-truthed: a 256-byte fixed
+/// string for `EventName` (no length prefix, unlike every other string
+/// this crate sends — this one just isn't length-tagged since it's a
+/// fixed field), then `BroadcastTo`(`u32`), `BufferSize`(`u32`), then
+/// `data` as a raw byte buffer whose length is exactly `BufferSize` — not
+/// null-terminated or padded, confirmed by the captured packet ending
+/// exactly at `data.len()` bytes past the `BufferSize` field.
+#[cfg(feature = "sunrise")]
+pub fn call_comm_bus_event(
+    protocol_version: u32,
+    event_name: &str,
+    broadcast_to: u32,
+    data: &[u8],
+) -> Result<PacketWriter, FixedStringError> {
+    let mut w = PacketWriter::new(opcode::sunrise::CALL_COMM_BUS_EVENT, protocol_version);
+    w.fixed_str(256, event_name)?;
+    w.u32(broadcast_to).u32(data.len() as u32);
+    w.bytes(data);
+    Ok(w)
+}
+
+/// Ground-truthed: a 256-byte fixed
+/// string for `szMenuItem`, then `MenuEventID`(`u32`) and `dwData`(`u32`).
+pub fn menu_add_item(
+    protocol_version: u32,
+    menu_item: &str,
+    menu_event_id: u32,
+    data: u32,
+) -> Result<PacketWriter, FixedStringError> {
+    let mut w = PacketWriter::new(opcode::MENU_ADD_ITEM, protocol_version);
+    w.fixed_str(256, menu_item)?;
+    w.u32(menu_event_id).u32(data);
+    Ok(w)
+}
+
+/// `_EX1` variant of [`request_facilities_list`]. Ground-truthed: identical
+/// payload shape (`facility_list_type`(`u32`) + `request_id`(`u32`)) to the
+/// non-`_EX1` call, just a different opcode.
+#[cfg(feature = "kittyhawk")]
+pub fn request_facilities_list_ex1(
+    protocol_version: u32,
+    facility_list_type: u32,
+    request_id: u32,
+) -> PacketWriter {
+    let mut w = PacketWriter::new(
+        opcode::kittyhawk::REQUEST_FACILITIES_LIST_EX1,
+        protocol_version,
+    );
+    w.u32(facility_list_type).u32(request_id);
+    w
+}
+
+/// Ground-truthed: same payload shape as
+/// [`request_facilities_list`]/[`request_facilities_list_ex1`]
+/// (`facility_list_type`(`u32`) + `request_id`(`u32`)), a different opcode
+/// again.
+#[cfg(feature = "kittyhawk")]
+pub fn request_all_facilities(
+    protocol_version: u32,
+    facility_list_type: u32,
+    request_id: u32,
+) -> PacketWriter {
+    let mut w = PacketWriter::new(opcode::kittyhawk::REQUEST_ALL_FACILITIES, protocol_version);
+    w.u32(facility_list_type).u32(request_id);
+    w
+}
+
+/// `_EX1` variant of [`map_input_event_to_client_event`]. Ground-truthed:
+/// `GroupID`(`u32`), 256-byte `szInputDefinition`, then `DownEventID`/
+/// `DownValue`/`UpEventID`/`UpValue`/`bMaskable` as five more `u32`s in
+/// declaration order.
+#[cfg(feature = "kittyhawk")]
+pub fn map_input_event_to_client_event_ex1(
+    protocol_version: u32,
+    group_id: u32,
+    input_definition: &str,
+    down_event_id: u32,
+    down_value: u32,
+    up_event_id: u32,
+    up_value: u32,
+    maskable: bool,
+) -> Result<PacketWriter, FixedStringError> {
+    let mut w = PacketWriter::new(
+        opcode::kittyhawk::MAP_INPUT_EVENT_TO_CLIENT_EVENT_EX1,
+        protocol_version,
+    );
+    w.u32(group_id);
+    w.fixed_str(256, input_definition)?;
+    w.u32(down_event_id)
+        .u32(down_value)
+        .u32(up_event_id)
+        .u32(up_value)
+        .u32(maskable as u32);
+    Ok(w)
+}
+
+/// `_EX1` variant of [`transmit_client_event`]. Ground-truthed: nine
+/// `u32`s in declaration order (`ObjectID`, `EventID`, `GroupID`, `Flags`,
+/// `dwData0`..`dwData4`).
+#[cfg(feature = "kittyhawk")]
+#[allow(clippy::too_many_arguments)]
+pub fn transmit_client_event_ex1(
+    protocol_version: u32,
+    object_id: u32,
+    event_id: u32,
+    group_id: u32,
+    flags: u32,
+    data0: u32,
+    data1: u32,
+    data2: u32,
+    data3: u32,
+    data4: u32,
+) -> PacketWriter {
+    let mut w = PacketWriter::new(
+        opcode::kittyhawk::TRANSMIT_CLIENT_EVENT_EX1,
+        protocol_version,
+    );
+    w.u32(object_id)
+        .u32(event_id)
+        .u32(group_id)
+        .u32(flags)
+        .u32(data0)
+        .u32(data1)
+        .u32(data2)
+        .u32(data3)
+        .u32(data4);
+    w
+}
+
+/// Ground-truthed: `RequestID`(`u32`)
+/// then `Type`(`u32`) — note `RequestID` comes first here, the opposite
+/// order from [`request_facilities_list`]'s `(type, request_id)`, matching
+/// `SimConnect_EnumerateSimObjectsAndLiveries(HANDLE,
+/// SIMCONNECT_DATA_REQUEST_ID RequestID, SIMCONNECT_SIMOBJECT_TYPE Type)`'s
+/// declared parameter order exactly.
+#[cfg(feature = "sunrise")]
+pub fn enumerate_sim_objects_and_liveries(
+    protocol_version: u32,
+    request_id: u32,
+    object_type: u32,
+) -> PacketWriter {
+    let mut w = PacketWriter::new(
+        opcode::sunrise::ENUMERATE_SIMOBJECTS_AND_LIVERIES,
+        protocol_version,
+    );
+    w.u32(request_id).u32(object_type);
     w
 }
 
@@ -705,6 +1244,259 @@ mod tests {
         r.outbound_header().unwrap();
         assert_eq!(r.u32().unwrap(), 100);
         assert_eq!(r.u32().unwrap(), 42);
+    }
+
+    #[test]
+    fn subscribe_to_flow_event_matches_ground_truth() {
+        let packet = subscribe_to_flow_event(6).finish(2);
+        assert_eq!(header_id(&packet), opcode::sunrise::SUBSCRIBE_TO_FLOW_EVENT);
+        assert_eq!(packet.len(), 16); // header only, no payload
+    }
+
+    #[test]
+    fn get_input_event_matches_ground_truth() {
+        let packet = get_input_event(6, 1, 0x1234_5678_9abc_def0).finish(2);
+        assert_eq!(header_id(&packet), opcode::kittyhawk::GET_INPUT_EVENT);
+        let mut r = PacketReader::new(&packet);
+        r.outbound_header().unwrap();
+        assert_eq!(r.u32().unwrap(), 1);
+        assert_eq!(r.u64().unwrap(), 0x1234_5678_9abc_def0);
+    }
+
+    #[test]
+    fn enumerate_input_event_params_matches_ground_truth() {
+        let packet = enumerate_input_event_params(6, 0x1234_5678_9abc_def0).finish(2);
+        assert_eq!(
+            header_id(&packet),
+            opcode::kittyhawk::ENUMERATE_INPUT_EVENT_PARAMS
+        );
+        let mut r = PacketReader::new(&packet);
+        r.outbound_header().unwrap();
+        assert_eq!(r.u64().unwrap(), 0x1234_5678_9abc_def0);
+        assert_eq!(packet.len(), 24); // header + one u64, no request id
+    }
+
+    #[test]
+    fn request_system_state_matches_ground_truth() {
+        let packet = request_system_state(6, 1, "AircraftLoaded").unwrap().finish(2);
+        assert_eq!(header_id(&packet), opcode::REQUEST_SYSTEM_STATE);
+        let mut r = PacketReader::new(&packet);
+        r.outbound_header().unwrap();
+        assert_eq!(r.u32().unwrap(), 1);
+        assert_eq!(r.fixed_str(256).unwrap(), "AircraftLoaded");
+    }
+
+    #[test]
+    fn set_system_state_matches_ground_truth() {
+        let packet = set_system_state(6, "Sound", 0x1111_2222, 3.5, "SysStateStr")
+            .unwrap()
+            .finish(2);
+        assert_eq!(header_id(&packet), opcode::SET_SYSTEM_STATE);
+        let mut r = PacketReader::new(&packet);
+        r.outbound_header().unwrap();
+        assert_eq!(r.fixed_str(256).unwrap(), "Sound");
+        assert_eq!(r.u32().unwrap(), 0x1111_2222);
+        assert_eq!(r.f32().unwrap(), 3.5);
+        assert_eq!(r.fixed_str(260).unwrap(), "SysStateStr");
+    }
+
+    #[test]
+    fn unsubscribe_to_facilities_matches_ground_truth() {
+        let packet = unsubscribe_to_facilities(6, 0).finish(2);
+        assert_eq!(
+            header_id(&packet),
+            opcode::kittyhawk::UNSUBSCRIBE_TO_FACILITIES
+        );
+        assert_eq!(packet.len(), 20); // header + one u32
+    }
+
+    #[test]
+    fn request_reserved_key_matches_ground_truth() {
+        let packet = request_reserved_key(6, 1, "choiceA", "choiceBB", "choiceCCC")
+            .unwrap()
+            .finish(2);
+        assert_eq!(header_id(&packet), opcode::REQUEST_RESERVED_KEY);
+        let mut r = PacketReader::new(&packet);
+        r.outbound_header().unwrap();
+        assert_eq!(r.u32().unwrap(), 1);
+        assert_eq!(r.fixed_str(30).unwrap(), "choiceA");
+        assert_eq!(r.fixed_str(30).unwrap(), "choiceBB");
+        assert_eq!(r.fixed_str(30).unwrap(), "choiceCCC");
+    }
+
+    #[test]
+    fn remove_input_event_matches_ground_truth() {
+        let packet = remove_input_event(6, 1, "joystick:0:button:0")
+            .unwrap()
+            .finish(2);
+        assert_eq!(header_id(&packet), opcode::REMOVE_INPUT_EVENT);
+        let mut r = PacketReader::new(&packet);
+        r.outbound_header().unwrap();
+        assert_eq!(r.u32().unwrap(), 1);
+        assert_eq!(r.fixed_str(256).unwrap(), "joystick:0:button:0");
+    }
+
+    #[test]
+    fn camera_acquire_matches_ground_truth() {
+        let packet = camera_acquire(6, "probe").unwrap().finish(2);
+        assert_eq!(header_id(&packet), opcode::sunrise::CAMERA_ACQUIRE);
+        assert_eq!(packet.len(), 16 + 2048);
+        let mut r = PacketReader::new(&packet);
+        r.outbound_header().unwrap();
+        assert_eq!(r.fixed_str(2048).unwrap(), "probe");
+    }
+
+    #[test]
+    fn camera_set_relative_6dof_matches_ground_truth() {
+        let packet = camera_set_relative_6dof(6, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0).finish(2);
+        assert_eq!(header_id(&packet), opcode::CAMERA_SET_RELATIVE_6DOF);
+        assert_eq!(
+            packet,
+            vec![
+                0x28, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x30, 0x00, 0x00, 0xf0, 0x02,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x3f, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00,
+                0x40, 0x40, 0x00, 0x00, 0x80, 0x40, 0x00, 0x00, 0xa0, 0x40, 0x00, 0x00, 0xc0,
+                0x40,
+            ]
+        );
+    }
+
+    #[test]
+    fn subscribe_to_comm_bus_event_matches_ground_truth() {
+        let packet = subscribe_to_comm_bus_event(6, 1, "MyEvent").unwrap().finish(2);
+        assert_eq!(
+            header_id(&packet),
+            opcode::sunrise::SUBSCRIBE_TO_COMM_BUS_EVENT
+        );
+        let mut r = PacketReader::new(&packet);
+        r.outbound_header().unwrap();
+        assert_eq!(r.u32().unwrap(), 1);
+        assert_eq!(r.fixed_str(256).unwrap(), "MyEvent");
+    }
+
+    #[test]
+    fn call_comm_bus_event_matches_ground_truth() {
+        let packet = call_comm_bus_event(6, "MyBusEventName", 0x99, b"PayloadData")
+            .unwrap()
+            .finish(2);
+        assert_eq!(header_id(&packet), opcode::sunrise::CALL_COMM_BUS_EVENT);
+        let mut r = PacketReader::new(&packet);
+        r.outbound_header().unwrap();
+        assert_eq!(r.fixed_str(256).unwrap(), "MyBusEventName");
+        assert_eq!(r.u32().unwrap(), 0x99);
+        assert_eq!(r.u32().unwrap(), 11);
+        assert_eq!(r.rest(), b"PayloadData");
+    }
+
+    #[test]
+    fn menu_add_item_matches_ground_truth() {
+        let packet = menu_add_item(6, "MyMenuItem", 1, 0).unwrap().finish(2);
+        assert_eq!(header_id(&packet), opcode::MENU_ADD_ITEM);
+        let mut r = PacketReader::new(&packet);
+        r.outbound_header().unwrap();
+        assert_eq!(r.fixed_str(256).unwrap(), "MyMenuItem");
+        assert_eq!(r.u32().unwrap(), 1);
+        assert_eq!(r.u32().unwrap(), 0);
+    }
+
+    #[test]
+    fn request_facilities_list_ex1_matches_ground_truth() {
+        let packet = request_facilities_list_ex1(6, 0, 1).finish(2);
+        assert_eq!(
+            header_id(&packet),
+            opcode::kittyhawk::REQUEST_FACILITIES_LIST_EX1
+        );
+        assert_eq!(packet.len(), 24);
+    }
+
+    #[test]
+    fn request_all_facilities_matches_ground_truth() {
+        let packet = request_all_facilities(6, 0, 1).finish(2);
+        assert_eq!(header_id(&packet), opcode::kittyhawk::REQUEST_ALL_FACILITIES);
+        assert_eq!(packet.len(), 24);
+    }
+
+    #[test]
+    fn map_input_event_to_client_event_ex1_matches_ground_truth() {
+        let packet =
+            map_input_event_to_client_event_ex1(6, 1, "joystick:0:button:0", 2, 0, 3, 0, false)
+                .unwrap()
+                .finish(2);
+        assert_eq!(
+            header_id(&packet),
+            opcode::kittyhawk::MAP_INPUT_EVENT_TO_CLIENT_EVENT_EX1
+        );
+        let mut r = PacketReader::new(&packet);
+        r.outbound_header().unwrap();
+        assert_eq!(r.u32().unwrap(), 1);
+        assert_eq!(r.fixed_str(256).unwrap(), "joystick:0:button:0");
+        assert_eq!(r.u32().unwrap(), 2);
+        assert_eq!(r.u32().unwrap(), 0);
+        assert_eq!(r.u32().unwrap(), 3);
+        assert_eq!(r.u32().unwrap(), 0);
+        assert_eq!(r.u32().unwrap(), 0);
+    }
+
+    #[test]
+    fn transmit_client_event_ex1_matches_ground_truth() {
+        let packet = transmit_client_event_ex1(6, 0, 1, 2, 0, 10, 20, 30, 40, 50).finish(2);
+        assert_eq!(
+            header_id(&packet),
+            opcode::kittyhawk::TRANSMIT_CLIENT_EVENT_EX1
+        );
+        assert_eq!(
+            packet,
+            vec![
+                0x34, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x44, 0x00, 0x00, 0xf0, 0x02,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00,
+                0x00, 0x1e, 0x00, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00, 0x32, 0x00, 0x00, 0x00,
+            ]
+        );
+    }
+
+    #[test]
+    fn enumerate_sim_objects_and_liveries_matches_ground_truth() {
+        let packet = enumerate_sim_objects_and_liveries(6, 1, 0).finish(2);
+        assert_eq!(
+            header_id(&packet),
+            opcode::sunrise::ENUMERATE_SIMOBJECTS_AND_LIVERIES
+        );
+        assert_eq!(
+            packet,
+            vec![
+                0x18, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x5b, 0x00, 0x00, 0xf0, 0x02,
+                0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ]
+        );
+    }
+
+    #[test]
+    fn request_jetway_data_matches_ground_truth() {
+        // Exact ground-truthed bytes.
+        let packet = request_jetway_data(6, "KSEA", &[]).unwrap().finish(2);
+        assert_eq!(
+            packet,
+            vec![
+                0x28, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x4b, 0x00, 0x00, 0xf0, 0x02,
+                0x00, 0x00, 0x00, 0x4b, 0x53, 0x45, 0x41, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00,
+            ]
+        );
+    }
+
+    #[test]
+    fn request_facilities_list_matches_ground_truth() {
+        // Exact ground-truthed bytes.
+        let packet = request_facilities_list(6, 0, 1).finish(2);
+        assert_eq!(
+            packet,
+            vec![
+                0x18, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x43, 0x00, 0x00, 0xf0, 0x02,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+            ]
+        );
     }
 
     #[test]

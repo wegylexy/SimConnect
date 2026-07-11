@@ -73,6 +73,53 @@ impl<T: DataDefinition> DataDefinitionGuard<T> {
     }
 }
 
+/// Handle returned by [`SimConnect::define_client_data`]. Unlike
+/// [`DataDefinitionGuard`], this does *not* send `ClearClientDataDefinition`
+/// on drop — a ClientData area and its definition are typically meant to
+/// outlive the client that mapped them (other add-ons, or this same add-on
+/// across a reconnect, may want to keep reading/writing the same area), so
+/// tying its lifetime to this handle would be surprising. Call
+/// [`SimConnect::clear_client_data_definition`] explicitly if you do want it
+/// gone.
+pub struct ClientDataDefinitionGuard<T: DataDefinition> {
+    client_data_id: u32,
+    define_id: u32,
+    connection: Arc<Connection>,
+    _marker: std::marker::PhantomData<T>,
+}
+
+impl<T: DataDefinition> ClientDataDefinitionGuard<T> {
+    pub fn client_data_id(&self) -> u32 {
+        self.client_data_id
+    }
+
+    pub fn define_id(&self) -> u32 {
+        self.define_id
+    }
+
+    /// Decodes a `RecvClientData::data` payload (see
+    /// `simconnect_proto::recv::parse_client_data`) for this definition.
+    pub fn decode(&self, data: &[u8]) -> Result<T, TooShort> {
+        T::decode(data)
+    }
+
+    /// Encodes `value` and sends it as a `SetClientData` write — the
+    /// ClientData counterpart to
+    /// [`DataDefinitionGuard::set_data_on_sim_object`].
+    pub async fn set_client_data(&self, value: &T) -> Result<u32, ClientError> {
+        let bytes = value.encode()?;
+        let packet = simconnect_proto::send::set_client_data(
+            self.connection.protocol_version_wire(),
+            self.client_data_id,
+            self.define_id,
+            0,
+            bytes.len() as u32,
+            &bytes,
+        );
+        Ok(self.connection.send(packet).await?)
+    }
+}
+
 impl<T: DataDefinition> Drop for DataDefinitionGuard<T> {
     fn drop(&mut self) {
         let define_id = self.define_id;
@@ -141,6 +188,60 @@ impl SimConnect {
             .await?;
         }
         Ok(DataDefinitionGuard {
+            define_id,
+            connection: self.connection_handle(),
+            _marker: std::marker::PhantomData,
+        })
+    }
+
+    /// Registers `T::SCHEMA` as a ClientData definition instead of a
+    /// SimObject data definition: each field goes through
+    /// `AddToClientDataDefinition` at successive byte offsets (computed from
+    /// `DataType::byte_width`) rather than `AddToDataDefinition` matched by
+    /// simvar name — `T`'s fields are just being reused as a raw memory
+    /// layout here, not simvar bindings, so `units_name` is ignored.
+    /// Live-confirmed end to end against a real MSFS2024 instance (a
+    /// two-`i32`-field struct mapped/created/defined/written with no
+    /// exception reply).
+    ///
+    /// Does not call `MapClientDataNameToID`/`CreateClientData` — call
+    /// [`Self::map_client_data_name_to_id`]/[`Self::create_client_data`]
+    /// first to establish `client_data_id` (this mirrors the real
+    /// `SimConnect_AddToClientDataDefinition` API, which likewise assumes
+    /// the area already exists).
+    ///
+    /// # Panics
+    ///
+    /// Panics if any field's `DataType` has no fixed byte width (`StringV`,
+    /// or `Invalid` — neither should appear in a real `#[derive(DataDefinition)]`
+    /// schema) — a ClientData definition has no way to express a
+    /// variable-length field at a static offset.
+    pub async fn define_client_data<T: DataDefinition>(
+        &self,
+        client_data_id: u32,
+        define_id: u32,
+    ) -> Result<ClientDataDefinitionGuard<T>, ClientError> {
+        let mut offset = 0u32;
+        for field in T::SCHEMA {
+            let width = field.data_type.byte_width().unwrap_or_else(|| {
+                panic!(
+                    "field with datum_name {:?} has DataType {:?}, which has no fixed byte width \
+                     and can't be placed in a ClientData definition",
+                    field.datum_name, field.data_type
+                )
+            });
+            self.add_to_client_data_definition(
+                define_id,
+                offset,
+                width,
+                field.epsilon,
+                simconnect_proto::send::UNUSED as u32,
+            )
+            .await?;
+            offset += width;
+        }
+        Ok(ClientDataDefinitionGuard {
+            client_data_id,
             define_id,
             connection: self.connection_handle(),
             _marker: std::marker::PhantomData,

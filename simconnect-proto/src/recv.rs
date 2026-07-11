@@ -124,6 +124,17 @@ pub fn parse_sim_object_data<'a>(
     })
 }
 
+/// `SIMCONNECT_RECV_CLIENT_DATA` (`RecvId::ClientData`'s reply) is an empty
+/// struct that inherits `SIMCONNECT_RECV_SIMOBJECT_DATA` with no additional
+/// fields — i.e. it's byte-identical to a `SimObjectData` reply. This just
+/// reuses that parser under a name matching the `RecvId` it actually
+/// decodes.
+pub type RecvClientData<'a> = RecvSimObjectData<'a>;
+
+pub fn parse_client_data<'a>(r: &mut PacketReader<'a>) -> Result<RecvClientData<'a>, TooShort> {
+    parse_sim_object_data(r)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RecvAssignedObjectId {
     pub request_id: u32,
@@ -152,6 +163,166 @@ pub fn parse_system_state(r: &mut PacketReader) -> Result<RecvSystemState, TooSh
         float: r.f32()?,
         string: r.fixed_str(256)?,
     })
+}
+
+/// Common wrapper header shared by `RECV_ID_AIRPORT_LIST`/`VOR_LIST`/
+/// `NDB_LIST`/`WAYPOINT_LIST` (`SIMCONNECT_RECV_FACILITIES_LIST`) — a list
+/// can be split across multiple sends when it's too big for one packet
+/// (`entry_number`/`out_of`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FacilitiesList {
+    pub request_id: u32,
+    pub array_size: u32,
+    pub entry_number: u32,
+    pub out_of: u32,
+}
+
+fn parse_facilities_list(r: &mut PacketReader) -> Result<FacilitiesList, TooShort> {
+    Ok(FacilitiesList {
+        request_id: r.u32()?,
+        array_size: r.u32()?,
+        entry_number: r.u32()?,
+        out_of: r.u32()?,
+    })
+}
+
+/// `SIMCONNECT_DATA_FACILITY_AIRPORT`, field-for-field ground-truthed:
+/// `char Ident[9]`, `char Region[3]`, then three `double`s. `Waypoint`/
+/// `Ndb`/`Vor` each inherit this struct and append their own fields (see
+/// [`FacilityWaypoint`]/[`FacilityNdb`]/[`FacilityVor`]) — this base layout
+/// is live-confirmed against a real MSFS2024 instance (a
+/// `request_facilities_list` call returned a genuine `AirportList` reply
+/// with plausible real airport data), though the `Waypoint`/`Ndb`/`Vor`
+/// extensions specifically haven't been exercised live yet.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FacilityAirport {
+    pub ident: String,
+    pub region: String,
+    pub latitude: f64,
+    pub longitude: f64,
+    pub altitude: f64,
+}
+
+fn parse_facility_airport(r: &mut PacketReader) -> Result<FacilityAirport, TooShort> {
+    Ok(FacilityAirport {
+        ident: r.fixed_str(9)?,
+        region: r.fixed_str(3)?,
+        latitude: r.f64()?,
+        longitude: r.f64()?,
+        altitude: r.f64()?,
+    })
+}
+
+/// `SIMCONNECT_DATA_FACILITY_WAYPOINT`: a [`FacilityAirport`] plus
+/// `fMagVar` (magnetic variation in degrees).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FacilityWaypoint {
+    pub airport: FacilityAirport,
+    pub mag_var: f32,
+}
+
+fn parse_facility_waypoint(r: &mut PacketReader) -> Result<FacilityWaypoint, TooShort> {
+    Ok(FacilityWaypoint {
+        airport: parse_facility_airport(r)?,
+        mag_var: r.f32()?,
+    })
+}
+
+/// `SIMCONNECT_DATA_FACILITY_NDB`: a [`FacilityWaypoint`] plus
+/// `fFrequency` (Hz).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FacilityNdb {
+    pub waypoint: FacilityWaypoint,
+    pub frequency: u32,
+}
+
+fn parse_facility_ndb(r: &mut PacketReader) -> Result<FacilityNdb, TooShort> {
+    Ok(FacilityNdb {
+        waypoint: parse_facility_waypoint(r)?,
+        frequency: r.u32()?,
+    })
+}
+
+/// `SIMCONNECT_DATA_FACILITY_VOR`: a [`FacilityNdb`] plus VOR-specific
+/// flags/localizer/glideslope fields.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FacilityVor {
+    pub ndb: FacilityNdb,
+    /// `SIMCONNECT_VOR_FLAGS` bitmask.
+    pub flags: u32,
+    pub localizer_degrees: f32,
+    pub glide_lat: f64,
+    pub glide_lon: f64,
+    pub glide_alt: f64,
+    pub glide_slope_angle_degrees: f32,
+}
+
+fn parse_facility_vor(r: &mut PacketReader) -> Result<FacilityVor, TooShort> {
+    Ok(FacilityVor {
+        ndb: parse_facility_ndb(r)?,
+        flags: r.u32()?,
+        localizer_degrees: r.f32()?,
+        glide_lat: r.f64()?,
+        glide_lon: r.f64()?,
+        glide_alt: r.f64()?,
+        glide_slope_angle_degrees: r.f32()?,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecvAirportList {
+    pub list: FacilitiesList,
+    pub entries: Vec<FacilityAirport>,
+}
+
+pub fn parse_airport_list(r: &mut PacketReader) -> Result<RecvAirportList, TooShort> {
+    let list = parse_facilities_list(r)?;
+    let entries = (0..list.array_size)
+        .map(|_| parse_facility_airport(r))
+        .collect::<Result<_, _>>()?;
+    Ok(RecvAirportList { list, entries })
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecvWaypointList {
+    pub list: FacilitiesList,
+    pub entries: Vec<FacilityWaypoint>,
+}
+
+pub fn parse_waypoint_list(r: &mut PacketReader) -> Result<RecvWaypointList, TooShort> {
+    let list = parse_facilities_list(r)?;
+    let entries = (0..list.array_size)
+        .map(|_| parse_facility_waypoint(r))
+        .collect::<Result<_, _>>()?;
+    Ok(RecvWaypointList { list, entries })
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecvNdbList {
+    pub list: FacilitiesList,
+    pub entries: Vec<FacilityNdb>,
+}
+
+pub fn parse_ndb_list(r: &mut PacketReader) -> Result<RecvNdbList, TooShort> {
+    let list = parse_facilities_list(r)?;
+    let entries = (0..list.array_size)
+        .map(|_| parse_facility_ndb(r))
+        .collect::<Result<_, _>>()?;
+    Ok(RecvNdbList { list, entries })
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecvVorList {
+    pub list: FacilitiesList,
+    pub entries: Vec<FacilityVor>,
+}
+
+pub fn parse_vor_list(r: &mut PacketReader) -> Result<RecvVorList, TooShort> {
+    let list = parse_facilities_list(r)?;
+    let entries = (0..list.array_size)
+        .map(|_| parse_facility_vor(r))
+        .collect::<Result<_, _>>()?;
+    Ok(RecvVorList { list, entries })
 }
 
 // MSFS2020 additions. Struct field lists are confirmed against
@@ -426,6 +597,51 @@ pub mod kittyhawk {
             .collect::<Result<_, _>>()?;
         Ok(RecvEnumerateInputEvents { list, entries })
     }
+
+    /// `RecvId::GetInputEvent`'s reply (`send::get_input_event`'s reply) —
+    /// live-confirmed against a real MSFS2024 instance:
+    /// `request_id`(`u32`), `event_type`(`u32`, `SIMCONNECT_INPUT_EVENT_TYPE`
+    /// — `DOUBLE`/`STRING`, raw discriminant per this module's usual
+    /// convention for unconfirmed-order enums), then `value` as an `f64`
+    /// (only meaningful for `event_type == DOUBLE`; a `STRING` value's
+    /// wire shape wasn't captured by this test).
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct RecvGetInputEvent {
+        pub request_id: u32,
+        pub event_type: u32,
+        pub value: f64,
+    }
+
+    pub fn parse_get_input_event(r: &mut PacketReader) -> Result<RecvGetInputEvent, TooShort> {
+        Ok(RecvGetInputEvent {
+            request_id: r.u32()?,
+            event_type: r.u32()?,
+            value: r.f64()?,
+        })
+    }
+}
+
+/// MSFS2024 additions.
+#[cfg(feature = "sunrise")]
+pub mod sunrise {
+    use super::*;
+
+    /// `RecvId::CameraStatus`'s reply (`camera_acquire`'s reply, among
+    /// others) — live-confirmed against a real MSFS2024 instance:
+    /// `camera_acquire` returned `acquired_state = 1` (acquired) and
+    /// `game_controlled = true` after a successful call.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct RecvCameraStatus {
+        pub acquired_state: u32,
+        pub game_controlled: bool,
+    }
+
+    pub fn parse_camera_status(r: &mut PacketReader) -> Result<RecvCameraStatus, TooShort> {
+        Ok(RecvCameraStatus {
+            acquired_state: r.u32()?,
+            game_controlled: r.bool32()?,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -463,6 +679,47 @@ mod tests {
         let parsed = parse_open(&mut r).unwrap();
         assert_eq!(parsed.application_name, "test-app");
         assert_eq!(parsed.sim_connect_version.build_major, 61259);
+    }
+
+    #[test]
+    fn airport_list_round_trips_one_entry() {
+        let mut w = PacketWriter::new_inbound(18, 4);
+        w.u32(1).u32(1).u32(0).u32(1); // FacilitiesList wrapper
+        w.fixed_str(9, "KSEA").unwrap();
+        w.fixed_str(3, "US").unwrap();
+        w.f64(47.44).f64(-122.30).f64(433.0);
+        let packet = w.finish_inbound();
+        let mut r = PacketReader::new(&packet);
+        r.header().unwrap();
+        let al = parse_airport_list(&mut r).unwrap();
+        assert_eq!(al.list.array_size, 1);
+        assert_eq!(al.entries.len(), 1);
+        assert_eq!(al.entries[0].ident, "KSEA");
+        assert_eq!(al.entries[0].region, "US");
+        assert_eq!(al.entries[0].altitude, 433.0);
+    }
+
+    #[test]
+    fn vor_list_round_trips_one_entry() {
+        let mut w = PacketWriter::new_inbound(19, 4);
+        w.u32(1).u32(1).u32(0).u32(1); // FacilitiesList wrapper
+        w.fixed_str(9, "SEA").unwrap(); // airport.ident
+        w.fixed_str(3, "US").unwrap(); // airport.region
+        w.f64(47.44).f64(-122.30).f64(433.0); // airport lat/lon/alt
+        w.f32(15.5); // waypoint.mag_var
+        w.u32(112_300_000); // ndb.frequency
+        w.u32(0b1); // vor.flags
+        w.f32(90.0); // localizer_degrees
+        w.f64(47.5).f64(-122.4).f64(1000.0); // glide lat/lon/alt
+        w.f32(3.0); // glide_slope_angle_degrees
+        let packet = w.finish_inbound();
+        let mut r = PacketReader::new(&packet);
+        r.header().unwrap();
+        let vl = parse_vor_list(&mut r).unwrap();
+        assert_eq!(vl.entries.len(), 1);
+        assert_eq!(vl.entries[0].ndb.waypoint.airport.ident, "SEA");
+        assert_eq!(vl.entries[0].ndb.frequency, 112_300_000);
+        assert_eq!(vl.entries[0].glide_slope_angle_degrees, 3.0);
     }
 
     #[test]
@@ -602,6 +859,21 @@ mod tests {
         }
 
         #[test]
+        fn get_input_event_matches_ground_truth() {
+            // Exact bytes from a live-confirmed reply: request_id=200,
+            // event_type=0 (DOUBLE), value=0.0.
+            let mut w = PacketWriter::new_inbound(35, 6);
+            w.u32(200).u32(0).f64(0.0);
+            let packet = w.finish_inbound();
+            let mut r = PacketReader::new(&packet);
+            r.header().unwrap();
+            let ev = parse_get_input_event(&mut r).unwrap();
+            assert_eq!(ev.request_id, 200);
+            assert_eq!(ev.event_type, 0);
+            assert_eq!(ev.value, 0.0);
+        }
+
+        #[test]
         fn set_and_subscribe_input_event_have_expected_opcodes() {
             let set = send::set_input_event(4, 0x1234, &[1, 2, 3, 4]).finish(1);
             let mut r = PacketReader::new(&set);
@@ -616,6 +888,26 @@ mod tests {
                 r.header().unwrap().id,
                 send::opcode::kittyhawk::SUBSCRIBE_INPUT_EVENT
             );
+        }
+    }
+
+    #[cfg(feature = "sunrise")]
+    mod sunrise_tests {
+        use super::*;
+        use crate::recv::sunrise::*;
+
+        #[test]
+        fn camera_status_matches_ground_truth() {
+            // Exact bytes from a live-confirmed reply: acquired_state=1
+            // (ACQUIRED), game_controlled=1 (true).
+            let mut w = PacketWriter::new_inbound(41, 6);
+            w.u32(1).u32(1);
+            let packet = w.finish_inbound();
+            let mut r = PacketReader::new(&packet);
+            r.header().unwrap();
+            let status = parse_camera_status(&mut r).unwrap();
+            assert_eq!(status.acquired_state, 1);
+            assert!(status.game_controlled);
         }
     }
 }

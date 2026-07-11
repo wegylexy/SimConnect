@@ -34,4 +34,31 @@ pub trait DataDefinition: Sized {
     /// name) can fail to encode (too long, or a codepoint outside Latin-1)
     /// — see `strings::FixedStringError`.
     fn encode(&self) -> Result<Vec<u8>, FixedStringError>;
+
+    /// Total wire byte width of `Self` — the sum of every field's
+    /// `DataType::byte_width()`. Matches what `encode()` actually produces
+    /// (assuming every field has a fixed width; see that method's panic
+    /// condition), so a caller registering `Self` as a ClientData area
+    /// (`SimConnect::create_client_data`) doesn't have to separately work
+    /// out and hardcode the same number `#[derive(DataDefinition)]` already
+    /// knows from `SCHEMA`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any field's `DataType` has no fixed byte width (`StringV`
+    /// or `Invalid` — neither should appear in a real derived schema).
+    fn client_data_byte_size() -> u32 {
+        Self::SCHEMA
+            .iter()
+            .map(|field| {
+                field.data_type.byte_width().unwrap_or_else(|| {
+                    panic!(
+                        "field with datum_name {:?} has DataType {:?}, which has no fixed byte \
+                         width and can't be sized for a ClientData area",
+                        field.datum_name, field.data_type
+                    )
+                })
+            })
+            .sum()
+    }
 }
