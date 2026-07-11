@@ -2,3 +2,6 @@
 **/target/
 Cargo.lock.bak
 *.pdb
+__pycache__/
+**/__pycache__/
+/scripts/event_docs_cache/

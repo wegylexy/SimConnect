@@ -88,18 +88,22 @@ pub enum ComRadio {
 
 impl ComRadio {
     pub(crate) fn hz_event_name(self) -> &'static str {
+        use events::client::radio_navigation::{
+            COM2_RADIO_SET_HZ, COM3_RADIO_SET_HZ, COM_RADIO_SET_HZ,
+        };
         match self {
-            Self::Com1 => events::COM_RADIO_SET_HZ,
-            Self::Com2 => events::COM2_RADIO_SET_HZ,
-            Self::Com3 => events::COM3_RADIO_SET_HZ,
+            Self::Com1 => COM_RADIO_SET_HZ,
+            Self::Com2 => COM2_RADIO_SET_HZ,
+            Self::Com3 => COM3_RADIO_SET_HZ,
         }
     }
 
     pub(crate) fn bcd16_event_name(self) -> &'static str {
+        use events::client::radio_navigation::{COM2_RADIO_SET, COM3_RADIO_SET, COM_RADIO_SET};
         match self {
-            Self::Com1 => events::COM_RADIO_SET,
-            Self::Com2 => events::COM2_RADIO_SET,
-            Self::Com3 => events::COM3_RADIO_SET,
+            Self::Com1 => COM_RADIO_SET,
+            Self::Com2 => COM2_RADIO_SET,
+            Self::Com3 => COM3_RADIO_SET,
         }
     }
 
@@ -957,8 +961,9 @@ impl SimConnect {
     /// `simconnect_proto::send::subscribe_to_flow_event`.
     #[cfg(feature = "sunrise")]
     pub async fn subscribe_to_flow_event(&self) -> io::Result<u32> {
-        let packet =
-            simconnect_proto::send::subscribe_to_flow_event(self.connection.protocol_version_wire());
+        let packet = simconnect_proto::send::subscribe_to_flow_event(
+            self.connection.protocol_version_wire(),
+        );
         self.connection.send(packet).await
     }
 
