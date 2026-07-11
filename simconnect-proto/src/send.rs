@@ -234,24 +234,34 @@ pub fn request_data_on_sim_object_type(
 /// definition registered for `define_id`; the caller is responsible for
 /// laying them out per `add_to_data_definition` order (this crate does not
 /// attempt to derive that layout from Rust types).
+///
+/// `array_count`/`unit_size` mirror the official
+/// `SimConnect_SetDataOnSimObject(..., DWORD ArrayCount, DWORD
+/// cbUnitSize, ...)` signature directly — confirmed against a live
+/// MSFS2024 capture, where getting this wrong (an earlier version of this
+/// function computed a "count" from `data.len() / unit_size` and sent
+/// `(count, unit_size)`, which cannot express the common single-value
+/// case at all) made every write fail with `RECV_EXCEPTION::InvalidDataSize`.
+/// For the common case of writing one non-array value/struct (the whole
+/// registered data definition, once): `array_count = 0`, `unit_size =
+/// data.len() as u32` (the *total* byte size of that one write, not a
+/// per-field size). For an actual array write: `array_count` = number of
+/// elements, `unit_size` = bytes per element, and `data.len() ==
+/// array_count * unit_size`.
 pub fn set_data_on_sim_object(
     protocol_version: u32,
     define_id: u32,
     object_id: u32,
     flags: DataSetFlags,
+    array_count: u32,
     unit_size: u32,
     data: &[u8],
 ) -> PacketWriter {
-    let count = if unit_size == 0 {
-        0
-    } else {
-        data.len() as u32 / unit_size
-    };
     let mut w = PacketWriter::new(opcode::SET_DATA_ON_SIM_OBJECT, protocol_version);
     w.u32(define_id)
         .u32(object_id)
         .u32(flags.bits())
-        .u32(count)
+        .u32(array_count)
         .u32(unit_size)
         .bytes(data);
     w
@@ -451,8 +461,14 @@ pub fn ai_set_aircraft_flight_plan(
 
 /// Registers one field of a facility data definition (parallel to
 /// [`add_to_data_definition`] for sim objects, but for the modern facility
-/// data API — e.g. field name `"OPEN AIRPORT"`, `"LATITUDE"`,
-/// `"CLOSE AIRPORT"`).
+/// data API). **The `"OPEN <TYPE>"`/`"CLOSE <TYPE>"` bracketing (e.g.
+/// `"OPEN AIRPORT"` ... `"LATITUDE"`/`"LONGITUDE"`/`"ALTITUDE"` ...
+/// `"CLOSE AIRPORT"`) is required, not illustrative** — confirmed against
+/// a live MSFS2024 capture: calling this with `"LATITUDE"` etc. directly,
+/// without opening/closing an `"OPEN AIRPORT"`/`"CLOSE AIRPORT"` pair
+/// around them, makes the later `request_facility_data` call fail with
+/// `RECV_EXCEPTION::DataError`; bracketed, it correctly returns the
+/// requested fields.
 #[cfg(feature = "kittyhawk")]
 pub fn add_to_facility_definition(
     protocol_version: u32,
@@ -596,7 +612,7 @@ mod tests {
     use crate::data::InitPosition;
 
     fn header_id(packet: &[u8]) -> u32 {
-        PacketReader::new(packet).header().unwrap().id
+        PacketReader::new(packet).outbound_header().unwrap().0
     }
 
     #[test]
@@ -606,7 +622,7 @@ mod tests {
             .finish(1);
         assert_eq!(header_id(&packet), opcode::AI_CREATE_PARKED_ATC_AIRCRAFT);
         let mut r = PacketReader::new(&packet);
-        r.header().unwrap();
+        r.outbound_header().unwrap();
         assert_eq!(r.fixed_str(256).unwrap(), "Boeing 747-8i Asobo");
         assert_eq!(r.fixed_str(12).unwrap(), "N747BA");
         assert_eq!(r.fixed_str(5).unwrap(), "KSEA");
@@ -629,7 +645,7 @@ mod tests {
         .finish(1);
         assert_eq!(header_id(&packet), opcode::AI_CREATE_ENROUTE_ATC_AIRCRAFT);
         let mut r = PacketReader::new(&packet);
-        r.header().unwrap();
+        r.outbound_header().unwrap();
         assert_eq!(r.fixed_str(256).unwrap(), "Boeing 747-8i Asobo");
         assert_eq!(r.fixed_str(12).unwrap(), "N747BA");
         assert_eq!(r.i32().unwrap(), 123);
@@ -660,7 +676,7 @@ mod tests {
             .finish(1);
         assert_eq!(header_id(&packet), opcode::AI_CREATE_NON_ATC_AIRCRAFT);
         let mut r = PacketReader::new(&packet);
-        r.header().unwrap();
+        r.outbound_header().unwrap();
         assert_eq!(r.fixed_str(256).unwrap(), "Boeing 747-8i Asobo");
         assert_eq!(r.fixed_str(12).unwrap(), "N747BA");
         assert_eq!(InitPosition::read_le(&mut r).unwrap(), pos);
@@ -675,7 +691,7 @@ mod tests {
             .finish(1);
         assert_eq!(header_id(&packet), opcode::AI_CREATE_SIMULATED_OBJECT);
         let mut r = PacketReader::new(&packet);
-        r.header().unwrap();
+        r.outbound_header().unwrap();
         assert_eq!(r.fixed_str(256).unwrap(), "Boeing 747-8i Asobo");
         assert_eq!(InitPosition::read_le(&mut r).unwrap(), pos);
         assert_eq!(r.u32().unwrap(), 42);
@@ -686,7 +702,7 @@ mod tests {
         let packet = ai_release_control(4, 100, 42).finish(1);
         assert_eq!(header_id(&packet), opcode::AI_RELEASE_CONTROL);
         let mut r = PacketReader::new(&packet);
-        r.header().unwrap();
+        r.outbound_header().unwrap();
         assert_eq!(r.u32().unwrap(), 100);
         assert_eq!(r.u32().unwrap(), 42);
     }
@@ -696,7 +712,7 @@ mod tests {
         let packet = ai_remove_object(4, 100, 42).finish(1);
         assert_eq!(header_id(&packet), opcode::AI_REMOVE_OBJECT);
         let mut r = PacketReader::new(&packet);
-        r.header().unwrap();
+        r.outbound_header().unwrap();
         assert_eq!(r.u32().unwrap(), 100);
         assert_eq!(r.u32().unwrap(), 42);
     }
@@ -708,7 +724,7 @@ mod tests {
             .finish(1);
         assert_eq!(header_id(&packet), opcode::AI_SET_AIRCRAFT_FLIGHT_PLAN);
         let mut r = PacketReader::new(&packet);
-        r.header().unwrap();
+        r.outbound_header().unwrap();
         assert_eq!(r.u32().unwrap(), 100);
         assert_eq!(r.fixed_str(260).unwrap(), "myflightplan");
         assert_eq!(r.u32().unwrap(), 42);

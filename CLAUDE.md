@@ -72,12 +72,31 @@ generated paths.
 
 ## Wire-format gotchas
 
-0. **The packet header is 16 bytes, not 12.** `size`(i32) + `version`(u32) +
-   `id`/opcode(u32) + `send_id`(u32). It's easy to write a reader that only
-   consumes the first three fields — `recv::tests::event_frame_parses_nested_event`
-   catches this (every field reads 4 bytes short if `PacketReader::header`
-   doesn't also consume `send_id`). If a newly-added `parse_*` function's
-   fields come back offset by exactly 4 bytes, check this first.
+0. **The header is asymmetric: 12 bytes inbound, 16 bytes outbound — don't
+   assume they're the same.** Server-to-client packets are `size`(i32) +
+   `version`(u32) + `id`/opcode(u32), 12 bytes — this is `PacketReader::header`,
+   the one every real `parse_*` call site uses. Client-to-server packets add a
+   4th field, `send_id`(u32), 16 bytes total — this is what `PacketWriter::new`/
+   `finish` build, and it's what the sim echoes back in
+   `RECV_EXCEPTION.dwSendID` for correlation (`recv::parse_exception`, not the
+   generic header). This crate originally had `PacketReader::header` consume
+   all 4 fields on the inbound side too, which is wrong but easy to not
+   notice: it doesn't error, it just shifts every subsequent field by 4 bytes
+   and produces a plausible-looking wrong value instead of an error. Caught
+   only by decoding a live MSFS2024 capture: `RECV_SIMOBJECT_DATA.define_id`
+   and `RECV_EXCEPTION.exception` (`NameUnrecognized` for a bogus datum name,
+   `CreateObjectFailed` for an invalid AI object title) only matched what was
+   actually sent/expected once the 4th field was dropped from
+   `PacketReader::header`. All of `recv.rs`'s own tests were self-referential
+   (`PacketWriter` build → `PacketReader` read, sharing the same wrong
+   assumption on both sides) and couldn't have caught this — they now build
+   fake inbound packets with `PacketWriter::new_inbound`/`finish_inbound`
+   (the 12-byte shape) instead of `new`/`finish` (the 16-byte outbound
+   shape), and outbound-packet tests that need the 4th field use
+   `PacketReader::outbound_header` instead of `header`. If a newly-added
+   `parse_*` function's fields come back offset by exactly 4 bytes, or a
+   decoded value is a plausible-but-wrong enum/id, check which header shape
+   the test/code is assuming.
 1. **Strings are Latin-1, not ASCII or UTF-8.** Fixed-width `SIMCONNECT_STRINGnn`
    fields can contain byte values above 0x7F (titles, liveries, ICAO codes).
    ASCII mangles them; Latin-1 round-trips every byte losslessly. See

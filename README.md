@@ -193,10 +193,15 @@ if header.id == simconnect::proto::enums::RecvId::AssignedObjectId as u32 {
 ```
 
 To move a created object afterward — e.g. driving its position from
-externally-tracked traffic data — keep control with the AI system (skip
-`ai_release_control`) and periodically push a position update via the
-same data-definition mechanism used for reading/writing the user
-aircraft, targeting the assigned object id instead of `0`:
+externally-tracked traffic data — call `ai_release_control` first (so the
+built-in AI logic isn't fighting your writes), then push position updates
+via the same data-definition mechanism used for reading/writing the user
+aircraft, targeting the assigned object id instead of `0`. Confirmed
+against a live MSFS2024 instance end to end — full runnable version:
+[`simconnect/examples/ai_taxi.rs`](simconnect/examples/ai_taxi.rs)
+(`cargo run --example ai_taxi`), which also demonstrates letting the
+sim's own physics smoothly integrate motion from a written velocity
+(`VELOCITY BODY Z`) instead of teleporting position every tick:
 
 ```rust
 use simconnect::DataDefinition;
@@ -235,6 +240,22 @@ MSFS2024 added `_EX1` variants of `AICreateSimulatedObject`/
 SimObjects) — not implemented, since no wire opcode for them is sourced
 yet; the non-`_EX1` functions above are unaffected and work unchanged on
 MSFS2024.
+
+## System events
+
+`subscribe_to_system_event`/`unsubscribe_to_system_event` take any system
+event name as a plain string; `simconnect_proto::events::system` has
+constants for the commonly-needed ones (`SIM`, `PAUSE`, and — behind
+`kittyhawk` — `PAUSE_EX1`), each confirmed against a live MSFS2024
+capture with the exact `dwData` values observed for real pause/menu
+states (see their doc comments). `PAUSE_EX1`'s bitmask decodes with
+`simconnect_proto::enums::PauseStateEx1`.
+
+```rust
+use simconnect::proto::events::system;
+
+sim.subscribe_to_system_event(1, system::PAUSE_EX1).await?;
+```
 
 ## Gotchas: BCD16, octal squawk codes, and other common hiccups
 

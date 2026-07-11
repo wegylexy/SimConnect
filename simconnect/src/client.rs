@@ -358,11 +358,17 @@ impl SimConnect {
         self.connection.send(packet).await
     }
 
+    /// `array_count`/`unit_size` are `SimConnect_SetDataOnSimObject`'s
+    /// `ArrayCount`/`cbUnitSize` verbatim — see
+    /// `simconnect_proto::send::set_data_on_sim_object`'s doc comment for
+    /// what to pass for the common single-value case vs. an actual array
+    /// write.
     pub async fn set_data_on_sim_object(
         &self,
         define_id: u32,
         object_id: u32,
         flags: DataSetFlags,
+        array_count: u32,
         unit_size: u32,
         data: &[u8],
     ) -> io::Result<u32> {
@@ -371,6 +377,7 @@ impl SimConnect {
             define_id,
             object_id,
             flags,
+            array_count,
             unit_size,
             data,
         );

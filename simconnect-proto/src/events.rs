@@ -24,3 +24,55 @@ pub const COM2_RADIO_SET_HZ: &str = "COM2_RADIO_SET_HZ";
 pub const COM3_RADIO_SET: &str = "COM3_RADIO_SET";
 /// COM3, exact Hz.
 pub const COM3_RADIO_SET_HZ: &str = "COM3_RADIO_SET_HZ";
+
+/// Known SimConnect *system* event names — plain strings passed to
+/// `send::subscribe_to_system_event`/`unsubscribe_to_system_event`, not new
+/// opcodes or wire structures (unlike the client events above, these fire
+/// unprompted whenever the sim's own state changes, not in response to a
+/// `transmit_client_event` call). The `RecvEvent` a subscription produces
+/// has `group_id == u32::MAX` (`SIMCONNECT_UNUSED`, confirmed against a
+/// live MSFS2024 capture) and `event_id` equal to whatever id was passed to
+/// `subscribe_to_system_event`, not tied to the event name string itself —
+/// `event_id` is how a caller with multiple subscriptions tells them apart
+/// in its `recv()` loop.
+pub mod system {
+    /// Fires whenever the simulation loop starts/stops running —
+    /// `dwData == 1`/`0`. Confirmed against a live MSFS2024 capture to
+    /// already read `1` at the ready-to-fly menu screen and unchanged
+    /// during an active flight — it tracks the sim engine's own run state,
+    /// not "in a flight" vs. "at a menu" as such; don't use it to
+    /// distinguish those. `dwData` is otherwise undocumented as anything
+    /// other than a plain 0/1, so this crate doesn't offer a decode helper
+    /// (unlike [`PAUSE_EX1`]).
+    pub const SIM: &str = "Sim";
+
+    /// Legacy pause notification — `dwData == 1` while paused (of any
+    /// kind), `0` otherwise. Confirmed against a live MSFS2024 capture:
+    /// `dwData == 1` both for an Esc-menu pause and for toggling the
+    /// in-sim play/pause icon (Active Pause), at the ready-to-fly screen
+    /// and in-flight alike. Can't distinguish *which* kind of pause (menu,
+    /// active pause, etc.) — see [`PAUSE_EX1`], which replaces this for
+    /// that.
+    ///
+    /// Also confirmed to read `1` (with [`PAUSE_EX1`] `== PauseStateEx1::SIM`)
+    /// at the main menu *after* having flown and returned to it, vs. `0`/
+    /// `PauseStateEx1::OFF` at a genuinely fresh app launch before any
+    /// flight has started — MSFS keeps that flight/world session loaded
+    /// behind the main menu rather than tearing it down, and counts that
+    /// as the same kind of pause as pressing Esc mid-flight, even though
+    /// [`SIM`] reads `1` (running) in both menu states.
+    pub const PAUSE: &str = "Pause";
+
+    /// Bitmask pause notification (see
+    /// [`crate::enums::PauseStateEx1`] for the bit layout and what's
+    /// confirmed vs. documented-but-unverified) — added because [`PAUSE`]
+    /// alone can't tell an Esc-menu pause apart from other pause states.
+    /// Gated behind `kittyhawk` alongside every other post-FSX addition
+    /// this crate tracks, even though (unlike most of those) this is a
+    /// plain string passed to the same FSX-era
+    /// `subscribe_to_system_event` opcode as [`SIM`]/[`PAUSE`] — no new
+    /// wire opcode or struct, just a magic string this crate hasn't
+    /// independently confirmed predates MSFS2020.
+    #[cfg(feature = "kittyhawk")]
+    pub const PAUSE_EX1: &str = "Pause_EX1";
+}

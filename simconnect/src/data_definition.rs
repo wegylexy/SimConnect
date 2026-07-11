@@ -51,8 +51,9 @@ impl<T: DataDefinition> DataDefinitionGuard<T> {
     /// `RECV_ASSIGNED_OBJECT_ID` reply for an AI-created object) — the
     /// same call as [`SimConnect::set_data_on_sim_object`], but without
     /// needing to pass this guard's own `define_id`, encode `value`
-    /// yourself, or spell out `DataSetFlags::empty()`/a `0` unit size for
-    /// the common "write one value" case.
+    /// yourself, or spell out `DataSetFlags::empty()`/`array_count = 0`/
+    /// `unit_size = value.encode()?.len()` for the common "write one
+    /// value" case.
     pub async fn set_data_on_sim_object(
         &self,
         object_id: u32,
@@ -65,6 +66,7 @@ impl<T: DataDefinition> DataDefinitionGuard<T> {
             object_id,
             simconnect_proto::enums::DataSetFlags::empty(),
             0,
+            bytes.len() as u32,
             &bytes,
         );
         Ok(self.connection.send(packet).await?)

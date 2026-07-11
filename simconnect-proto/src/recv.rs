@@ -446,16 +446,18 @@ mod tests {
         let mut r = PacketReader::new(&packet);
         let header = r.header().unwrap();
         assert_eq!(header.id, send::opcode::OPEN);
-        assert_eq!(header.send_id, 7);
+        // Outbound-only 4th field (send id); not part of the inbound header
+        // `PacketReader::header` reads, so check it directly.
+        assert_eq!(u32::from_le_bytes(packet[12..16].try_into().unwrap()), 7);
     }
 
     #[test]
     fn recv_open_round_trips_through_writer_and_reader() {
-        let mut w = PacketWriter::new(2, 4);
+        let mut w = PacketWriter::new_inbound(2, 4);
         w.fixed_str(256, "test-app").unwrap();
         w.i32(1).i32(0).i32(62615).i32(0); // application version
         w.i32(10).i32(0).i32(61259).i32(0); // sim connect version
-        let packet = w.finish(0);
+        let packet = w.finish_inbound();
         let mut r = PacketReader::new(&packet);
         r.header().unwrap();
         let parsed = parse_open(&mut r).unwrap();
@@ -465,9 +467,9 @@ mod tests {
 
     #[test]
     fn event_frame_parses_nested_event() {
-        let mut w = PacketWriter::new(9, 4);
+        let mut w = PacketWriter::new_inbound(9, 4);
         w.u32(1).u32(2).i32(3).f32(60.0).f32(1.0);
-        let packet = w.finish(0);
+        let packet = w.finish_inbound();
         let mut r = PacketReader::new(&packet);
         r.header().unwrap();
         let ev = parse_event_frame(&mut r).unwrap();
@@ -483,9 +485,9 @@ mod tests {
 
         #[test]
         fn event_ex1_round_trips() {
-            let mut w = PacketWriter::new(29, 4);
+            let mut w = PacketWriter::new_inbound(29, 4);
             w.u32(1).u32(2).u32(10).u32(20).u32(30).u32(40).u32(50);
-            let packet = w.finish(0);
+            let packet = w.finish_inbound();
             let mut r = PacketReader::new(&packet);
             r.header().unwrap();
             let ev = parse_event_ex1(&mut r).unwrap();
@@ -502,15 +504,17 @@ mod tests {
             let mut r = PacketReader::new(&packet);
             let header = r.header().unwrap();
             assert_eq!(header.id, send::opcode::kittyhawk::REQUEST_FACILITY_DATA);
-            assert_eq!(header.send_id, 9);
+            // Outbound-only 4th field (send id); not part of the inbound
+            // header `PacketReader::header` reads, so check it directly.
+            assert_eq!(u32::from_le_bytes(packet[12..16].try_into().unwrap()), 9);
 
             // Recv side has a different layout (envelope + type/index
             // fields, not the request's define/request ids as sent) — spot
             // check it parses without asserting cross-compatibility.
-            let mut w = PacketWriter::new(30, 4);
+            let mut w = PacketWriter::new_inbound(30, 4);
             w.u32(1).u32(2).u32(0).u32(3).u32(1).u32(0).u32(5);
             w.bytes(&[0xAA, 0xBB, 0xCC]);
-            let recv_packet = w.finish(0);
+            let recv_packet = w.finish_inbound();
             let mut rr = PacketReader::new(&recv_packet);
             rr.header().unwrap();
             let fd = parse_facility_data(&mut rr).unwrap();
@@ -523,7 +527,7 @@ mod tests {
 
         #[test]
         fn jetway_data_round_trips_one_entry() {
-            let mut w = PacketWriter::new(33, 4);
+            let mut w = PacketWriter::new_inbound(33, 4);
             // list template
             w.u32(1).u32(1).u32(0).u32(1);
             // one JETWAY_DATA entry
@@ -536,7 +540,7 @@ mod tests {
                 w.f64(0.0).f64(0.0).f64(0.0); // 4x Xyz
             }
             w.u32(111).u32(222); // object ids
-            let packet = w.finish(0);
+            let packet = w.finish_inbound();
             let mut r = PacketReader::new(&packet);
             r.header().unwrap();
             let jd = parse_jetway_data(&mut r).unwrap();
@@ -549,12 +553,12 @@ mod tests {
 
         #[test]
         fn controllers_list_round_trips_one_entry() {
-            let mut w = PacketWriter::new(34, 4);
+            let mut w = PacketWriter::new_inbound(34, 4);
             w.u32(1).u32(1).u32(0).u32(1); // list template
             w.fixed_str(256, "Yoke").unwrap();
             w.u32(1).u32(2).u32(3); // device/product/composite id
             w.i32(1).i32(0).i32(100).i32(0); // hardware version
-            let packet = w.finish(0);
+            let packet = w.finish_inbound();
             let mut r = PacketReader::new(&packet);
             r.header().unwrap();
             let cl = parse_controllers_list(&mut r).unwrap();
@@ -565,10 +569,10 @@ mod tests {
 
         #[test]
         fn action_callback_round_trips() {
-            let mut w = PacketWriter::new(35, 4);
+            let mut w = PacketWriter::new_inbound(35, 4);
             w.fixed_str(260, "MyAction").unwrap();
             w.u32(42);
-            let packet = w.finish(0);
+            let packet = w.finish_inbound();
             let mut r = PacketReader::new(&packet);
             r.header().unwrap();
             let cb = parse_action_callback(&mut r).unwrap();
@@ -583,12 +587,12 @@ mod tests {
             let header = r.header().unwrap();
             assert_eq!(header.id, send::opcode::kittyhawk::ENUMERATE_INPUT_EVENTS);
 
-            let mut w = PacketWriter::new(36, 4);
+            let mut w = PacketWriter::new_inbound(36, 4);
             w.u32(7).u32(1).u32(0).u32(1); // list template
             w.fixed_str(64, "THROTTLE_SET").unwrap();
             w.u64(0xDEAD_BEEF_u64);
             w.u32(2);
-            let recv_packet = w.finish(0);
+            let recv_packet = w.finish_inbound();
             let mut rr = PacketReader::new(&recv_packet);
             rr.header().unwrap();
             let events = parse_enumerate_input_events(&mut rr).unwrap();

@@ -18,13 +18,30 @@ pub struct PacketWriter {
 
 impl PacketWriter {
     /// Reserves a packet with a placeholder header (patched by `finish`) for
-    /// the given opcode.
+    /// the given opcode. Client-to-server packets carry a 4th header field
+    /// (a send id set by `finish`) that the sim echoes back in
+    /// `RECV_EXCEPTION.dwSendID` for correlation — this is the outbound-only
+    /// header shape. Server-to-client packets don't have this field; see
+    /// [`Self::new_inbound`] for building/reading those (real inbound
+    /// decoding is `PacketReader::header`, which reads the 3-field shape).
     pub fn new(opcode: u32, protocol_version: u32) -> Self {
         let mut buf = Vec::with_capacity(64);
         buf.extend_from_slice(&0i32.to_le_bytes()); // size, patched in `finish`
         buf.extend_from_slice(&protocol_version.to_le_bytes());
         buf.extend_from_slice(&opcode.to_le_bytes());
         buf.extend_from_slice(&0u32.to_le_bytes()); // send id, set by the connection layer
+        Self { buf }
+    }
+
+    /// Builds a packet in the server-to-client wire shape: `size`, `version`,
+    /// `id` only — no send id field. Used by tests to synthesize realistic
+    /// inbound packets (the sim never sends us packets built with
+    /// [`Self::new`]'s 4-field shape); pair with [`Self::finish_inbound`].
+    pub fn new_inbound(opcode: u32, protocol_version: u32) -> Self {
+        let mut buf = Vec::with_capacity(64);
+        buf.extend_from_slice(&0i32.to_le_bytes()); // size, patched in `finish_inbound`
+        buf.extend_from_slice(&protocol_version.to_le_bytes());
+        buf.extend_from_slice(&opcode.to_le_bytes());
         Self { buf }
     }
 
@@ -79,6 +96,15 @@ impl PacketWriter {
         self.buf[0..4].copy_from_slice(&size.to_le_bytes());
         self.buf
     }
+
+    /// Finalizes the size field on a [`Self::new_inbound`]-built packet.
+    /// There's no send id to patch — the inbound header shape doesn't have
+    /// that field.
+    pub fn finish_inbound(mut self) -> Vec<u8> {
+        let size = self.buf.len() as i32;
+        self.buf[0..4].copy_from_slice(&size.to_le_bytes());
+        self.buf
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -86,10 +112,6 @@ pub struct PacketHeader {
     pub size: i32,
     pub version: u32,
     pub id: u32,
-    /// Send id: allocated by the sender for outbound packets, unused (0)
-    /// on most inbound ones — but always present on the wire, so it must be
-    /// consumed to keep the cursor aligned with the fields that follow.
-    pub send_id: u32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -114,13 +136,37 @@ impl<'a> PacketReader<'a> {
         Self { buf, pos: 0 }
     }
 
+    /// Reads the server-to-client wire header: `size`, `version`, `id` — 12
+    /// bytes, three fields. Confirmed against a live MSFS2024 instance:
+    /// under this reading, `RECV_SIMOBJECT_DATA.define_id` and
+    /// `RECV_EXCEPTION.exception` both matched the actual request/error
+    /// (`NameUnrecognized` for a bogus datum name, `CreateObjectFailed` for
+    /// an invalid AI object title); reading a 4th "send id" field here (as
+    /// this crate did previously) shifts every subsequent field by 4 bytes
+    /// and silently produces a different-but-plausible-looking wrong value
+    /// instead of an error. Client-to-server packets *do* have that 4th
+    /// field — see [`PacketWriter::new`] — this asymmetry matches the
+    /// public SDK's `SIMCONNECT_RECV` struct, which only has these 3
+    /// members; `dwSendID` only exists inside `SIMCONNECT_RECV_EXCEPTION`
+    /// itself (`recv::parse_exception`), not the generic header.
     pub fn header(&mut self) -> Result<PacketHeader, TooShort> {
         Ok(PacketHeader {
             size: self.i32()?,
             version: self.u32()?,
             id: self.u32()?,
-            send_id: self.u32()?,
         })
+    }
+
+    /// Reads the client-to-server wire header: `size`, `version`, `id`,
+    /// `send_id` — 16 bytes, four fields (see [`PacketWriter::new`]). Only
+    /// meaningful for parsing a packet this crate itself just built to send
+    /// — the sim never sends anything in this shape, so production
+    /// inbound-decoding code should use [`Self::header`] instead. Returns
+    /// `(id, send_id)`.
+    pub fn outbound_header(&mut self) -> Result<(u32, u32), TooShort> {
+        let header = self.header()?;
+        let send_id = self.u32()?;
+        Ok((header.id, send_id))
     }
 
     pub fn u32(&mut self) -> Result<u32, TooShort> {
