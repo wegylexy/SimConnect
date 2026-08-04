@@ -20,12 +20,133 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{parse_macro_input, Data, DeriveInput, Field, Fields, LitStr, Type};
 
-/// `__suffix` → SimConnect `Units` string. Deliberately small and
-/// explicit — SimConnect unit strings have irregular capitalization/
-/// spacing (`"Feet"`, `"Frequency BCD16"`) that isn't mechanically
-/// derivable from a lowercase suffix, so this only covers units this
-/// crate's own examples need. Extend as real usage calls for more.
-const UNIT_ALIASES: &[(&str, &str)] = &[("mhz", "MHz"), ("khz", "kHz"), ("hz", "Hz")];
+/// `__suffix` → SimConnect `Units` string, covering the SDK's documented
+/// "Units of Measurement" table. SimConnect unit strings have irregular
+/// capitalization/spacing (`"Feet"`, `"Frequency BCD16"`) that isn't
+/// mechanically derivable from a lowercase suffix, so each entry is
+/// spelled out explicitly. Suffixes are restricted to valid Rust
+/// identifier characters (`[a-z0-9_]`, no spaces), so multi-word units
+/// get a single run-together alias (e.g. `feetpersecond`).
+const UNIT_ALIASES: &[(&str, &str)] = &[
+    // Frequency
+    ("hz", "Hz"),
+    ("khz", "kHz"),
+    ("mhz", "MHz"),
+    ("bco16", "BCO16"),
+    ("frequencybcd16", "Frequency BCD16"),
+    // Length
+    ("meter", "Meter"),
+    ("meters", "Meters"),
+    ("kilometer", "Kilometer"),
+    ("kilometers", "Kilometers"),
+    ("centimeter", "Centimeter"),
+    ("centimeters", "Centimeters"),
+    ("millimeter", "Millimeter"),
+    ("millimeters", "Millimeters"),
+    ("foot", "Foot"),
+    ("feet", "Feet"),
+    ("inch", "Inch"),
+    ("inches", "Inches"),
+    ("yard", "Yard"),
+    ("yards", "Yards"),
+    ("mile", "Mile"),
+    ("miles", "Miles"),
+    ("nauticalmile", "Nautical Mile"),
+    ("nauticalmiles", "Nautical Miles"),
+    // Area
+    ("squarefeet", "Square Feet"),
+    ("squaremeters", "Square Meters"),
+    // Volume
+    ("gallon", "Gallon"),
+    ("gallons", "Gallons"),
+    ("liter", "Liter"),
+    ("liters", "Liters"),
+    ("quart", "Quart"),
+    ("quarts", "Quarts"),
+    // Temperature
+    ("celsius", "Celsius"),
+    ("rankine", "Rankine"),
+    ("kelvin", "Kelvin"),
+    ("fahrenheit", "Fahrenheit"),
+    // Angle
+    ("radian", "Radian"),
+    ("radians", "Radians"),
+    ("rounds", "Rounds"),
+    ("degree", "Degree"),
+    ("degrees", "Degrees"),
+    ("grad", "Grad"),
+    ("grads", "Grads"),
+    // Angular velocity
+    ("degreespersecond", "Degrees per second"),
+    ("radianspersecond", "Radians per second"),
+    ("roundsperminute", "Rounds per minute"),
+    ("rpm", "RPM"),
+    // Speed
+    ("knot", "Knot"),
+    ("knots", "Knots"),
+    ("feetpersecond", "Feet per second"),
+    ("feetperminute", "Feet per minute"),
+    ("meterspersecond", "Meters per second"),
+    ("kilometersperhour", "Kilometers per hour"),
+    ("milesperhour", "Miles per hour"),
+    ("mach", "Mach"),
+    // Force
+    ("pound", "Pound"),
+    ("pounds", "Pounds"),
+    ("newton", "Newton"),
+    ("newtons", "Newtons"),
+    ("poundforce", "Pound-force"),
+    // Weight/mass
+    ("kilogram", "Kilogram"),
+    ("kilograms", "Kilograms"),
+    ("slug", "Slug"),
+    ("slugs", "Slugs"),
+    ("poundsperhour", "Pounds per hour"),
+    ("kilogramsperhour", "Kilograms per hour"),
+    ("gallonsperhour", "Gallons per hour"),
+    ("literperhour", "Liter per hour"),
+    // Pressure
+    ("pascal", "Pascal"),
+    ("kilopascal", "Kilopascal"),
+    ("hectopascal", "Hectopascal"),
+    ("atm", "Atm"),
+    ("mmhg", "mmHg"),
+    ("inhg", "inHg"),
+    ("psi", "Psi"),
+    ("bar", "Bar"),
+    ("bars", "Bars"),
+    ("millibar", "Millibar"),
+    ("millibars", "Millibars"),
+    // Density
+    ("kilogramspercubicmeter", "Kilograms per cubic meter"),
+    ("slugspercubicfoot", "Slugs per cubic feet"),
+    // Electrical
+    ("ampere", "Ampere"),
+    ("amperes", "Amperes"),
+    ("volt", "Volt"),
+    ("volts", "Volts"),
+    // Time
+    ("second", "Second"),
+    ("seconds", "Seconds"),
+    ("minute", "Minute"),
+    ("minutes", "Minutes"),
+    ("hour", "Hour"),
+    ("hours", "Hours"),
+    ("day", "Day"),
+    ("days", "Days"),
+    ("year", "Year"),
+    ("years", "Years"),
+    // Miscellaneous
+    ("bool", "Bool"),
+    ("enum", "Enum"),
+    ("number", "Number"),
+    ("percent", "Percent"),
+    ("percentover100", "Percent Over 100"),
+    ("position", "Position"),
+    ("position16k", "Position 16k"),
+    ("position32k", "Position 32k"),
+    ("position128", "Position 128"),
+];
 
 #[proc_macro_derive(DataDefinition, attributes(simconnect))]
 pub fn derive_data_definition(input: TokenStream) -> TokenStream {
