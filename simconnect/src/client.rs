@@ -145,6 +145,41 @@ impl SimConnect {
         .await
     }
 
+    /// Like [`Self::open_local`], but tries every local pipe name this crate knows about instead
+    /// of only MSFS's — in order: `transport::DEFAULT_PIPE_NAME` (MSFS 2024 and 2020 alike, see
+    /// that constant's own doc comment), `transport::PREPAR3D_PIPE_NAMES` (newest to oldest),
+    /// `transport::FSX_PIPE_NAME`, then `transport::scan_for_pipe_names("simconnect")` as a final
+    /// catch-all for an installation none of the above name explicitly. The first reachable pipe
+    /// wins; if none connect, the last attempt's own error is returned.
+    #[cfg(windows)]
+    pub async fn open_any_local(application_name: &str) -> Result<Self, OpenError> {
+        let mut candidates = vec![transport::DEFAULT_PIPE_NAME.to_string()];
+        candidates.extend(transport::PREPAR3D_PIPE_NAMES.iter().map(|s| s.to_string()));
+        candidates.push(transport::FSX_PIPE_NAME.to_string());
+        candidates.extend(transport::scan_for_pipe_names("simconnect"));
+
+        let mut last_err = None;
+        for pipe_name in candidates {
+            let result = Self::open_with(application_name, || {
+                let pipe_name = pipe_name.clone();
+                async move {
+                    transport::connect_pipe(&pipe_name)
+                        .await
+                        .map(|p| Box::new(p) as Box<dyn Transport>)
+                }
+            })
+            .await;
+            match result {
+                Ok(sim) => return Ok(sim),
+                Err(e) => last_err = Some(e),
+            }
+        }
+        Err(last_err.unwrap_or(OpenError::Io(io::Error::new(
+            io::ErrorKind::NotFound,
+            "no local SimConnect pipe found",
+        ))))
+    }
+
     /// Connects over TCP (remote, or local if the sim's SimConnect.cfg
     /// enabled a TCP listener).
     pub async fn open_tcp(
