@@ -17,22 +17,136 @@ pub struct CfgEntry {
     pub port: u16,
 }
 
-/// Standard search locations, in order, for a `SimConnect.cfg` next to the
-/// running executable or in the user's `%APPDATA%` profile.
-pub fn default_search_paths() -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            paths.push(dir.join("SimConnect.cfg"));
+#[cfg(windows)]
+fn documents_folder() -> Option<PathBuf> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+
+    #[repr(C)]
+    struct KnownFolderId {
+        data1: u32,
+        data2: u16,
+        data3: u16,
+        data4: [u8; 8],
+    }
+    // FOLDERID_Documents: {FDD39AD0-238F-46AF-ADB4-6C85480369C7}
+    const FOLDERID_DOCUMENTS: KnownFolderId = KnownFolderId {
+        data1: 0xFDD39AD0,
+        data2: 0x238F,
+        data3: 0x46AF,
+        data4: [0xAD, 0xB4, 0x6C, 0x85, 0x48, 0x03, 0x69, 0xC7],
+    };
+
+    #[link(name = "shell32")]
+    extern "system" {
+        fn SHGetKnownFolderPath(
+            rfid: *const KnownFolderId,
+            dwFlags: u32,
+            hToken: *mut std::ffi::c_void,
+            ppszPath: *mut *mut u16,
+        ) -> i32;
+    }
+
+    #[link(name = "ole32")]
+    extern "system" {
+        fn CoTaskMemFree(pv: *mut std::ffi::c_void);
+    }
+
+    unsafe {
+        let mut path_ptr: *mut u16 = std::ptr::null_mut();
+        let hr = SHGetKnownFolderPath(&FOLDERID_DOCUMENTS, 0, std::ptr::null_mut(), &mut path_ptr);
+        if hr == 0 && !path_ptr.is_null() {
+            let mut len = 0;
+            while *path_ptr.add(len) != 0 {
+                len += 1;
+            }
+            let slice = std::slice::from_raw_parts(path_ptr, len);
+            let os_str = OsString::from_wide(slice);
+            CoTaskMemFree(path_ptr as *mut std::ffi::c_void);
+            return Some(PathBuf::from(os_str));
         }
     }
+    if let Ok(profile) = std::env::var("USERPROFILE") {
+        let p = PathBuf::from(profile).join("Documents");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+/// Standard search locations, in order, for a `SimConnect.cfg`:
+/// 1. Process directory (`current_exe().parent()`)
+/// 2. Current working directory (`current_dir()`)
+/// 3. User's Documents folder (and Prepar3D / FSX Files subdirectories)
+/// 4. `%APPDATA%` (Microsoft Flight Simulator, Lockheed Martin Prepar3D, FSX)
+/// 5. `%USERPROFILE%` profile root
+pub fn default_search_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let mut push_unique = |p: PathBuf| {
+        if !paths.contains(&p) {
+            paths.push(p);
+        }
+    };
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            push_unique(dir.join("SimConnect.cfg"));
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        push_unique(cwd.join("SimConnect.cfg"));
+    }
+
+    #[cfg(windows)]
+    if let Some(docs) = documents_folder() {
+        push_unique(docs.join("SimConnect.cfg"));
+        for p3d_dir in &[
+            "Prepar3D v6 Files",
+            "Prepar3D v5 Files",
+            "Prepar3D v4 Files",
+            "Prepar3D v3 Files",
+            "Prepar3D v2 Files",
+            "Prepar3D Files",
+            "Flight Simulator X Files",
+        ] {
+            push_unique(docs.join(p3d_dir).join("SimConnect.cfg"));
+        }
+    }
+
     if let Ok(appdata) = std::env::var("APPDATA") {
-        paths.push(
-            Path::new(&appdata)
+        let appdata_path = Path::new(&appdata);
+        push_unique(
+            appdata_path
                 .join("Microsoft Flight Simulator")
                 .join("SimConnect.cfg"),
         );
+        for p3d_ver in &["v6", "v5", "v4", "v3", "v2"] {
+            push_unique(
+                appdata_path
+                    .join("Lockheed Martin")
+                    .join(format!("Prepar3D {p3d_ver}"))
+                    .join("SimConnect.cfg"),
+            );
+        }
+        push_unique(
+            appdata_path
+                .join("Microsoft")
+                .join("FSX")
+                .join("SimConnect.cfg"),
+        );
+        push_unique(
+            appdata_path
+                .join("Microsoft")
+                .join("FSX-SE")
+                .join("SimConnect.cfg"),
+        );
     }
+
+    if let Ok(profile) = std::env::var("USERPROFILE") {
+        push_unique(Path::new(&profile).join("SimConnect.cfg"));
+    }
+
     paths
 }
 
@@ -131,5 +245,11 @@ mod tests {
     fn ignores_incomplete_sections() {
         let cfg = "[SimConnect]\nAddress=only-address\n";
         assert!(parse(cfg).is_empty());
+    }
+
+    #[test]
+    fn default_search_paths_returns_paths() {
+        let paths = default_search_paths();
+        assert!(!paths.is_empty());
     }
 }

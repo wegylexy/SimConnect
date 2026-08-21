@@ -14,7 +14,7 @@ name = "simconnect-cli"
 path = "src/main.rs"
 
 [dependencies]
-simconnect = { package = "flybywireless-simconnect", version = "0.1.9", path = "../simconnect", default-features = false }
+simconnect = { package = "flybywireless-simconnect", version = "0.1.10", path = "../simconnect", default-features = false }
 tokio = { version = "1", features = ["rt", "macros"] }
 
 [features]
