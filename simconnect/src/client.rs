@@ -32,6 +32,26 @@ pub use crate::connection::RecvGuard;
 use crate::connection::{Connection, OpenError};
 use crate::transport::{self, Transport};
 
+#[cfg(debug_assertions)]
+macro_rules! send_pkt {
+    ($self:expr, $packet:expr, $desc:expr) => {
+        $self.connection.send_with_desc($packet, || $desc).await
+    };
+    ($self:expr, $packet:expr) => {
+        $self.connection.send_with_desc($packet, || String::new()).await
+    };
+}
+
+#[cfg(not(debug_assertions))]
+macro_rules! send_pkt {
+    ($self:expr, $packet:expr, $desc:expr) => {
+        $self.connection.send($packet).await
+    };
+    ($self:expr, $packet:expr) => {
+        $self.connection.send($packet).await
+    };
+}
+
 pub struct SimConnect {
     connection: Arc<Connection>,
 }
@@ -249,7 +269,11 @@ impl SimConnect {
             event_id,
             event_name,
         )?;
-        Ok(self.connection.send(packet).await?)
+        Ok(send_pkt!(
+            self,
+            packet,
+            format!("MapClientEventToSimEvent(event_id: {event_id}, event: {event_name:?})")
+        )?)
     }
 
     pub async fn transmit_client_event(
@@ -268,7 +292,11 @@ impl SimConnect {
             group_id,
             flags,
         );
-        self.connection.send(packet).await
+        send_pkt!(
+            self,
+            packet,
+            format!("TransmitClientEvent(object_id: {object_id}, event_id: {event_id}, data: {data})")
+        )
     }
 
     pub async fn add_client_event_to_notification_group(
@@ -317,7 +345,14 @@ impl SimConnect {
             epsilon,
             datum_id,
         )?;
-        Ok(self.connection.send(packet).await?)
+        Ok(send_pkt!(
+            self,
+            packet,
+            format!(
+                "AddToDataDefinition(define_id: {define_id}, datum: {datum_name:?}, units: {:?})",
+                units_name.unwrap_or("")
+            )
+        )?)
     }
 
     /// Registers a COM radio frequency datum at exact precision, for both
@@ -482,7 +517,11 @@ impl SimConnect {
             interval,
             limit,
         );
-        self.connection.send(packet).await
+        send_pkt!(
+            self,
+            packet,
+            format!("RequestDataOnSimObject(request_id: {request_id}, define_id: {define_id}, object_id: {object_id}, period: {period:?})")
+        )
     }
 
     pub async fn request_data_on_sim_object_type(
@@ -499,7 +538,11 @@ impl SimConnect {
             radius_meters,
             object_type,
         );
-        self.connection.send(packet).await
+        send_pkt!(
+            self,
+            packet,
+            format!("RequestDataOnSimObjectType(request_id: {request_id}, define_id: {define_id}, type: {object_type:?})")
+        )
     }
 
     /// `array_count`/`unit_size` are `SimConnect_SetDataOnSimObject`'s
@@ -525,7 +568,11 @@ impl SimConnect {
             unit_size,
             data,
         );
-        self.connection.send(packet).await
+        send_pkt!(
+            self,
+            packet,
+            format!("SetDataOnSimObject(define_id: {define_id}, object_id: {object_id})")
+        )
     }
 
     pub async fn subscribe_to_system_event(
@@ -538,7 +585,11 @@ impl SimConnect {
             event_id,
             event_name,
         )?;
-        Ok(self.connection.send(packet).await?)
+        Ok(send_pkt!(
+            self,
+            packet,
+            format!("SubscribeToSystemEvent(event_id: {event_id}, event: {event_name:?})")
+        )?)
     }
 
     pub async fn unsubscribe_from_system_event(&self, event_id: u32) -> io::Result<u32> {
@@ -546,7 +597,11 @@ impl SimConnect {
             self.connection.protocol_version_wire(),
             event_id,
         );
-        self.connection.send(packet).await
+        send_pkt!(
+            self,
+            packet,
+            format!("UnsubscribeFromSystemEvent(event_id: {event_id})")
+        )
     }
 
     /// Creates an AI-controlled aircraft currently parked with no flight
@@ -569,7 +624,11 @@ impl SimConnect {
             airport_id,
             request_id,
         )?;
-        Ok(self.connection.send(packet).await?)
+        Ok(send_pkt!(
+            self,
+            packet,
+            format!("AiCreateParkedAtcAircraft(title: {container_title:?}, tail: {tail_number:?}, airport: {airport_id:?}, request_id: {request_id})")
+        )?)
     }
 
     /// Creates an AI-controlled aircraft already underway on a flight
@@ -596,7 +655,11 @@ impl SimConnect {
             touch_and_go,
             request_id,
         )?;
-        Ok(self.connection.send(packet).await?)
+        Ok(send_pkt!(
+            self,
+            packet,
+            format!("AiCreateEnrouteAtcAircraft(title: {container_title:?}, tail: {tail_number:?}, request_id: {request_id})")
+        )?)
     }
 
     /// Creates an aircraft not under ATC control (typically VFR) — also
@@ -1268,5 +1331,12 @@ impl SimConnect {
             object_type,
         );
         self.connection.send(packet).await
+    }
+
+    /// Looks up the human-readable description for a previously sent `send_id`.
+    /// Exists only under `#[cfg(debug_assertions)]`.
+    #[cfg(debug_assertions)]
+    pub fn describe_send(&self, send_id: u32) -> Option<String> {
+        self.connection.describe_send(send_id)
     }
 }

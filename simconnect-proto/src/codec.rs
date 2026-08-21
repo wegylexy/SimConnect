@@ -45,6 +45,10 @@ impl PacketWriter {
         Self { buf }
     }
 
+    pub fn opcode(&self) -> u32 {
+        u32::from_le_bytes(self.buf[8..12].try_into().unwrap())
+    }
+
     pub fn u32(&mut self, v: u32) -> &mut Self {
         self.buf.extend_from_slice(&v.to_le_bytes());
         self

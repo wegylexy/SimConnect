@@ -16,7 +16,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "flybywireless-simconnect"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "flybywireless-simconnect-derive",
  "flybywireless-simconnect-proto",
@@ -25,7 +25,7 @@ dependencies = [
 
 [[package]]
 name = "flybywireless-simconnect-cli"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "flybywireless-simconnect",
  "tokio",
@@ -33,7 +33,7 @@ dependencies = [
 
 [[package]]
 name = "flybywireless-simconnect-derive"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -42,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "flybywireless-simconnect-proto"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "bitflags",
 ]

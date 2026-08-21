@@ -410,10 +410,19 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
         let attr = parse_simconnect_attr(field)?;
         let parsed = parse_field_name(&ident.to_string());
 
+        let type_name = last_segment_name(&field.ty)?;
+        let mapping = map_type(&type_name, ident)?;
+
         let units = match (&attr.units, parsed.units) {
             (Some(u), _) => Some(u.clone()),
             (None, Some(u)) => Some(u.to_string()),
-            (None, None) => None,
+            (None, None) => {
+                if type_name == "bool" {
+                    Some("Bool".to_string())
+                } else {
+                    None
+                }
+            }
         };
         if attr.units.is_none() && units.is_none() {
             if let Some(suffix) = &parsed.unrecognized {
@@ -432,9 +441,6 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
                 ));
             }
         }
-
-        let type_name = last_segment_name(&field.ty)?;
-        let mapping = map_type(&type_name, ident)?;
 
         match mapping.units_mode {
             UnitsMode::Forbidden if units.is_some() => {

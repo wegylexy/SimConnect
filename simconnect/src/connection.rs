@@ -78,6 +78,8 @@ struct WriteSide {
 pub struct Connection {
     read: Mutex<ReadSide>,
     write: Mutex<WriteSide>,
+    #[cfg(debug_assertions)]
+    send_history: std::sync::Mutex<std::collections::BTreeMap<u32, String>>,
     pub protocol: ProtocolVersion,
     pub open: RecvOpen,
 }
@@ -123,6 +125,8 @@ impl Connection {
                             half: write_half,
                             next_send_id: 2,
                         }),
+                        #[cfg(debug_assertions)]
+                        send_history: std::sync::Mutex::new(std::collections::BTreeMap::new()),
                         protocol,
                         open,
                     });
@@ -145,6 +149,43 @@ impl Connection {
         w.half.write_all(&bytes).await?;
         w.half.flush().await?;
         Ok(send_id)
+    }
+
+    /// Allocates the next send id, records its description under debug builds,
+    /// and writes a fully-built packet. Exists only under `#[cfg(debug_assertions)]`.
+    #[cfg(debug_assertions)]
+    pub async fn send_with_desc<F>(&self, packet: PacketWriter, desc: F) -> io::Result<u32>
+    where
+        F: FnOnce() -> String,
+    {
+        let mut w = self.write.lock().await;
+        let send_id = w.next_send_id;
+        w.next_send_id += 1;
+        let opcode = packet.opcode();
+        let bytes = packet.finish(send_id);
+        w.half.write_all(&bytes).await?;
+        w.half.flush().await?;
+
+        let mut history = self.send_history.lock().unwrap();
+        if history.len() >= 1024 {
+            history.pop_first();
+        }
+        let desc_str = desc();
+        let desc_final = if desc_str.is_empty() {
+            format!("Opcode(0x{opcode:08X})")
+        } else {
+            desc_str
+        };
+        history.insert(send_id, desc_final);
+
+        Ok(send_id)
+    }
+
+    /// Looks up the human-readable description for a previously sent `send_id`.
+    /// Exists only under `#[cfg(debug_assertions)]`.
+    #[cfg(debug_assertions)]
+    pub fn describe_send(&self, send_id: u32) -> Option<String> {
+        self.send_history.lock().unwrap().get(&send_id).cloned()
     }
 
     /// Awaits the next full inbound packet into the connection's reused
@@ -256,6 +297,8 @@ mod tests {
                 half: write_half,
                 next_send_id: 2,
             }),
+            #[cfg(debug_assertions)]
+            send_history: std::sync::Mutex::new(std::collections::BTreeMap::new()),
             protocol: ProtocolVersion::negotiation_order()[0],
             open: RecvOpen {
                 application_name: String::new(),
@@ -304,5 +347,66 @@ mod tests {
             send_result.is_ok(),
             "send() blocked while a recv() guard was held"
         );
+    }
+
+    #[cfg(debug_assertions)]
+    #[tokio::test]
+    async fn records_and_describes_send_history() {
+        use std::sync::Arc;
+        use tokio::io::AsyncReadExt;
+
+        let (mut peer, sim_side) = tokio::io::duplex(1024);
+        let (read_half, write_half) = tokio::io::split(Box::new(sim_side) as Box<dyn Transport>);
+
+        let conn = Arc::new(Connection {
+            read: Mutex::new(ReadSide {
+                half: read_half,
+                buf: Vec::new(),
+            }),
+            write: Mutex::new(WriteSide {
+                half: write_half,
+                next_send_id: 98,
+            }),
+            send_history: std::sync::Mutex::new(std::collections::BTreeMap::new()),
+            protocol: ProtocolVersion::negotiation_order()[0],
+            open: RecvOpen {
+                application_name: String::new(),
+                application_version: simconnect_proto::protocol::SimConnectVersion {
+                    major: 0,
+                    minor: 0,
+                    build_major: 0,
+                    build_minor: 0,
+                },
+                sim_connect_version: simconnect_proto::protocol::SimConnectVersion {
+                    major: 0,
+                    minor: 0,
+                    build_major: 0,
+                    build_minor: 0,
+                },
+            },
+        });
+
+        tokio::spawn(async move {
+            let mut sink = [0u8; 64];
+            loop {
+                if peer.read(&mut sink).await.unwrap_or(0) == 0 {
+                    break;
+                }
+            }
+        });
+
+        let send_id = conn
+            .send_with_desc(PacketWriter::new(0xF000000C, 0), || {
+                "AddToDataDefinition(define_id: 6, datum: \"COM RECEIVE ALL\")".to_string()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(send_id, 98);
+        assert_eq!(
+            conn.describe_send(98).as_deref(),
+            Some("AddToDataDefinition(define_id: 6, datum: \"COM RECEIVE ALL\")")
+        );
+        assert_eq!(conn.describe_send(99), None);
     }
 }

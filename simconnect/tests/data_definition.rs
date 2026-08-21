@@ -85,6 +85,7 @@ fn schema_has_one_entry_per_field_in_declaration_order() {
     assert_eq!(schema[2].datum_name, "COM STANDBY FREQUENCY:1");
     assert_eq!(schema[2].units_name, Some("MHz"));
     assert_eq!(schema[3].datum_name, "ON");
+    assert_eq!(schema[3].units_name, Some("Bool"));
     assert_eq!(schema[3].data_type, DataType::Int32);
     assert_eq!(schema[7].datum_name, "TITLE");
     assert_eq!(schema[7].data_type, DataType::String256);
