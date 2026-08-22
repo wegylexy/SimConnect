@@ -21,8 +21,8 @@ categories.workspace = true
 name = "simconnect"
 
 [dependencies]
-simconnect-proto = { package = "flybywireless-simconnect-proto", version = "0.1.10", path = "../simconnect-proto", default-features = false }
-simconnect-derive = { package = "flybywireless-simconnect-derive", version = "0.1.10", path = "../simconnect-derive" }
+simconnect-proto = { package = "flybywireless-simconnect-proto", version = "0.1.11", path = "../simconnect-proto", default-features = false }
+simconnect-derive = { package = "flybywireless-simconnect-derive", version = "0.1.11", path = "../simconnect-derive" }
 tokio = { version = "1", features = ["rt", "net", "sync", "io-util", "macros", "time"] }
 
 [features]
@@ -31,4 +31,4 @@ kittyhawk = ["simconnect-proto/kittyhawk"]
 sunrise = ["kittyhawk", "simconnect-proto/sunrise"]
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt", "macros"] }
+tokio = { version = "1", features = ["rt", "macros", "time", "test-util"] }

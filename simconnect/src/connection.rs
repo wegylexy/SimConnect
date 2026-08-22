@@ -14,6 +14,7 @@
 //! *other reads*.
 
 use std::io;
+use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
@@ -53,6 +54,13 @@ impl std::fmt::Display for OpenError {
 }
 
 impl std::error::Error for OpenError {}
+
+/// How long [`Connection::recv`] will wait for a full packet before treating the connection as
+/// dead. Generous relative to any real SimConnect traffic pattern (even a client with no periodic
+/// subscription at all still gets an `Open` reply promptly on connect, and any client actually
+/// polling data does so far faster than this) so this only fires on genuine silence, not a slow
+/// but legitimate quiet period.
+const RECV_TIMEOUT: Duration = Duration::from_secs(30);
 
 struct ReadSide {
     half: tokio::io::ReadHalf<Box<dyn Transport>>,
@@ -193,10 +201,30 @@ impl Connection {
     /// allocation once the buffer's capacity has grown to fit the largest
     /// packet seen so far. Holds only the read-side lock, so a concurrent
     /// `send()` is never blocked by a guard the caller is still parsing.
+    ///
+    /// Bounded by [`RECV_TIMEOUT`]: a sim process disappearing (closed,
+    /// crashed, force-killed) does not reliably make the underlying named
+    /// pipe/socket read return an error — observed against MSFS 2024,
+    /// where killing it left this call blocked forever instead of erroring,
+    /// so a caller waiting on it never learned the sim was gone and could
+    /// never release resources gated on this connection's lifetime (e.g. an
+    /// exclusive "which sim connector owns this session" claim upstream).
+    /// A read succeeding just under the timeout resets it on the next call,
+    /// so this only ever fires on genuine silence, never cumulative traffic.
     pub async fn recv(&self) -> io::Result<RecvGuard<'_>> {
         let mut r = self.read.lock().await;
         let ReadSide { half, buf } = &mut *r;
-        read_packet_into(half, buf).await?;
+        match tokio::time::timeout(RECV_TIMEOUT, read_packet_into(half, buf)).await {
+            Ok(result) => result?,
+            Err(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!(
+                        "no data received in over {RECV_TIMEOUT:?} - assuming the peer is gone"
+                    ),
+                ));
+            }
+        }
         Ok(RecvGuard { guard: r })
     }
 
@@ -408,5 +436,53 @@ mod tests {
             Some("AddToDataDefinition(define_id: 6, datum: \"COM RECEIVE ALL\")")
         );
         assert_eq!(conn.describe_send(99), None);
+    }
+
+    /// `recv()` must not hang forever on pure silence — the whole reason `RECV_TIMEOUT` exists is
+    /// a sim disappearing without the OS ever surfacing a read error (observed against MSFS 2024).
+    /// Uses paused virtual time (`start_paused = true`) rather than a real 30s sleep so this test
+    /// runs instantly.
+    #[tokio::test(start_paused = true)]
+    async fn recv_times_out_on_silence() {
+        let (_peer, sim_side) = tokio::io::duplex(64);
+        let (read_half, write_half) = tokio::io::split(Box::new(sim_side) as Box<dyn Transport>);
+
+        let conn = Connection {
+            read: Mutex::new(ReadSide {
+                half: read_half,
+                buf: Vec::new(),
+            }),
+            write: Mutex::new(WriteSide {
+                half: write_half,
+                next_send_id: 0,
+            }),
+            #[cfg(debug_assertions)]
+            send_history: std::sync::Mutex::new(std::collections::BTreeMap::new()),
+            protocol: ProtocolVersion::negotiation_order()[0],
+            open: RecvOpen {
+                application_name: String::new(),
+                application_version: simconnect_proto::protocol::SimConnectVersion {
+                    major: 0,
+                    minor: 0,
+                    build_major: 0,
+                    build_minor: 0,
+                },
+                sim_connect_version: simconnect_proto::protocol::SimConnectVersion {
+                    major: 0,
+                    minor: 0,
+                    build_major: 0,
+                    build_minor: 0,
+                },
+            },
+        };
+
+        // `_peer` is kept alive (never dropped/written to) so this is genuine silence, not a
+        // clean EOF - the failure mode `RECV_TIMEOUT` targets is a peer that never signals
+        // anything at all, not one that closes cleanly.
+        let err = match conn.recv().await {
+            Ok(_) => panic!("expected recv() to time out on silence"),
+            Err(e) => e,
+        };
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
     }
 }

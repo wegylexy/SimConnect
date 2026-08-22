@@ -38,7 +38,10 @@ macro_rules! send_pkt {
         $self.connection.send_with_desc($packet, || $desc).await
     };
     ($self:expr, $packet:expr) => {
-        $self.connection.send_with_desc($packet, || String::new()).await
+        $self
+            .connection
+            .send_with_desc($packet, || String::new())
+            .await
     };
 }
 
@@ -295,7 +298,9 @@ impl SimConnect {
         send_pkt!(
             self,
             packet,
-            format!("TransmitClientEvent(object_id: {object_id}, event_id: {event_id}, data: {data})")
+            format!(
+                "TransmitClientEvent(object_id: {object_id}, event_id: {event_id}, data: {data})"
+            )
         )
     }
 
