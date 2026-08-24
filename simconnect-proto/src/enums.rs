@@ -80,7 +80,8 @@ pub enum RecvId {
     #[cfg(feature = "kittyhawk")]
     EnumerateInputEventParams = 37,
     /// MSFS2024 addition, ground-truthed alongside the rest of this range.
-    /// No decode support yet.
+    /// `recv::sunrise::parse_enumerate_simobject_and_livery_list` decodes
+    /// this; not yet live-confirmed — see GAPS.md.
     #[cfg(feature = "sunrise")]
     EnumerateSimobjectAndLiveryList = 38,
     /// `subscribe_to_flow_event`'s reply — no decode support yet, and as of

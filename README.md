@@ -235,6 +235,17 @@ movement
     .await?;
 ```
 
+Freezing a created object in place (rather than driving it) is a named
+client event too, same mechanism as any other — `FREEZE_LATITUDE_LONGITUDE_SET`/
+`FREEZE_ALTITUDE_SET`/`FREEZE_ATTITUDE_SET`, each targeting the assigned
+object id with `data0 = 1`. Combined with writing the generic light
+simvars (`LIGHT NAV`/`LIGHT BEACON`/`LIGHT STROBE`/`LIGHT LANDING`/
+`LIGHT TAXI`, all `bool`) via the same data-definition mechanism as
+`Position` above, this is enough to hover a static AI aircraft somewhere
+and cycle its lights — confirmed live end to end, full runnable version:
+[`simconnect/examples/drone_light_show.rs`](simconnect/examples/drone_light_show.rs)
+(`cargo run --example drone_light_show`).
+
 MSFS2024 added `_EX1` variants of `AICreateSimulatedObject`/
 `AICreateEnrouteATCAircraft` (adding a livery parameter for modular
 SimObjects) — both are implemented (`SimConnect::ai_create_simulated_object_ex1`/

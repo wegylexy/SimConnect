@@ -3,8 +3,11 @@
 Tracks what's *not* implemented yet, and why. Anything not listed here is
 done. Sourcing policy: official SDK docs (`docs.flightsimulator.com`) and
 independently-observed wire-protocol facts (opcode numbers, build
-numbers, field layouts) inform this crate; this project is MIT and
-doesn't cite or attribute any LGPL-licensed source, even for facts.
+numbers, field layouts) inform this crate; this project is MIT.
+Reading an LGPL-licensed reimplementation to cross-check or derive a
+wire-protocol fact is fine — facts aren't copyrightable — but this repo
+never cites, attributes, or names an LGPL source in code/comments/docs,
+and never copies its code.
 
 ## `RECV_ID` / opcode coverage
 
@@ -17,9 +20,9 @@ doesn't cite or attribute any LGPL-licensed source, even for facts.
 | `HEvent` in the Event API | post-FSX | not investigated |
 | `RecvFacilityDataEnd`'s field list beyond the two request ids | MSFS2020 | unconfirmed |
 | `SIMCONNECT_FACILITY_DATA_TYPE`/`SIMCONNECT_INPUT_EVENT_TYPE` enum discriminants | MSFS2020 | field layouts confirmed, but exposed as raw `u32` (`RecvFacilityData::data_type`, `InputEventDescriptor::event_type`) rather than variants — `FACILITY_DATA_TYPE`'s member order is documented, `INPUT_EVENT_TYPE`'s isn't confirmed from any source, so both were left as raw integers to avoid mixing a confirmed enum with a guessed one |
-| `AICreateEnrouteATCAircraft_EX1` decode support | MSFS2024 | send builder exists, opcode cross-confirmed against an independent reimplementation, but not yet live-tested (its sibling `ai_create_simulated_object_ex1` is live-confirmed) |
+| `AICreateEnrouteATCAircraft_EX1` decode support | MSFS2024 | send builder exists, opcode `0x58` and layout (`containerTitle(256) + livery(256) + tailNumber(12) + flightNumber(i32) + flightPlanPath(260) + flightPlanPosition(f64) + touchAndGo(u32) + dataRequestId(u32)`) cross-confirmed against a second independent reimplementation, but not yet live-tested (its sibling `ai_create_simulated_object_ex1` is live-confirmed) |
 | `ControllersList`'s entry struct (`ControllerItem`/`parse_controller_item`) | MSFS2020 | **known broken.** Two live captures (5 devices, then 6) gave inconsistent per-entry widths, meaning entries are likely variable-length (probably a per-device axis/button array) rather than the crate's current fixed-width guess. Needs systematic offset analysis across both captures, not a fixed-width struct |
-| `EnumerateSimobjectAndLiveryList` reply decode (`RECV_ENUMERATE_SIMOBJECT_AND_LIVERY_LIST`) | MSFS2024 | send side implemented and live-confirmed (`enumerate_sim_objects_and_liveries`, opcode `0xF000005B`), but no reply decode — `RecvId::EnumerateSimobjectAndLiveryList` (38) exists with an explicit "No decode support yet" doc comment. **Real, currently-blocked downstream need** (not just a coverage gap): a consumer (POSCON's `tauri-launcher`, `src-tauri/simconnect/simconnect-rs`) needs this to inject AI traffic on MSFS2024 — every 2020-era hardcoded container title (`"Generic Airliner Twin Engines Asobo 00"`, `"Airbus A320 Neo Asobo"`, etc.) now fails `AICreateNonATCAircraft`/`ai_create_simulated_object_ex1` with `CreateObjectFailed`, because MSFS2024 replaced that whole AI-traffic content set with a new, differently-named `passiveaircraft` package family (`fs24-asobo-passiveaircraft-a320family`, `-b737family`, `-generic-glider`, etc., found by inspecting a real installed MSFS2024's `InstalledPackagesPath`) whose real container titles aren't published anywhere and can't be read off disk (MSFS2024's streamed-content installs pack model data into opaque `.fsarchive` blobs, not plain-text `aircraft.cfg`). Enumerating them at runtime via this reply is the only currently-known way to get real, working titles. **Wire layout, from the MSFS2024 SDK's `SimConnect.h`** (`SIMCONNECT_RECV_ENUMERATE_SIMOBJECT_AND_LIVERY_LIST : SIMCONNECT_RECV_LIST_TEMPLATE` + `SIMCONNECT_ENUMERATE_SIMOBJECT_LIVERY`): the generic `ListTemplate` header (`request_id`/`array_size`/`entry_number`/`out_of`, all `u32`, same as `parse_controllers_list`/`parse_jetway_data`'s own `parse_list_template` call), then `array_size` entries of `{ aircraft_title: fixed_str(256), livery_name: fixed_str(256) }` (Latin-1, null-terminated, matching `ControllerItem::device_name`'s own `r.fixed_str(256)` pattern in `parse_controller_item`). Implementation should mirror `parse_controllers_list`/`ControllerItem` exactly (a `RecvEnumerateSimobjectAndLiveryList { list: ListTemplate, entries: Vec<EnumerateSimobjectLivery> }` + `parse_enumerate_simobject_and_livery_list`, gated `#[cfg(feature = "sunrise")]`), with round-trip tests per this crate's existing `recv.rs` test conventions (build a fake inbound packet with `PacketWriter::new_inbound`/`finish_inbound` per CLAUDE.md's wire-format gotcha #0, not `new`/`finish`). The response can be paginated across multiple packets for a large install (`entry_number`/`out_of`) — a caller needs to accumulate across all pages before treating the list as complete, not just consume the first packet. Needs live-sim verification (`simconnect-cli` or `tauri-launcher`'s own consumer, which currently has a temporary hand-rolled decode of this exact struct directly in `src-tauri/src/simconnect.rs` reading raw `PacketReader` bytes — once this crate has a real typed decoder + a published version bump, that hand-rolled decode should be deleted in favor of depending on this crate's own `recv::parse_enumerate_simobject_and_livery_list`). |
+| `EnumerateSimobjectAndLiveryList` reply decode (`RECV_ENUMERATE_SIMOBJECT_AND_LIVERY_LIST`) | MSFS2024 | **Implemented and live-verified.** `recv::sunrise::{EnumerateSimobjectLivery, RecvEnumerateSimobjectAndLiveryList, parse_enumerate_simobject_and_livery_list}`, gated `#[cfg(feature = "sunrise")]`. `simconnect-cli` (`simconnect-cli/src/main.rs`'s `verify_enumerate_simobject_and_livery_list`) sends the request against a real running MSFS2024, decodes every paginated reply, and confirmed a clean end-to-end run: 73 pages, 5696 entries, zero decode errors, correct pagination termination on `entry_number + 1 >= out_of`. Titles covered aircraft, ships, and the wildlife/livestock object types (e.g. `PTigrisTigrisFemale`, `JerseyFemale_Cow`) — all cleanly split into `aircraft_title`/`livery_name` (livery empty for these non-aircraft objects, as expected). **Real downstream need this unblocks**: POSCON's `tauri-launcher` (`src-tauri/src/simconnect.rs`) needs this to inject AI traffic on MSFS2024 — every 2020-era hardcoded container title (`"Generic Airliner Twin Engines Asobo 00"`, `"Airbus A320 Neo Asobo"`, etc.) now fails `AICreateNonATCAircraft`/`ai_create_simulated_object_ex1` with `CreateObjectFailed`, because MSFS2024 replaced that whole AI-traffic content set with a new, differently-named `passiveaircraft` package family (`fs24-asobo-passiveaircraft-a320family`, `-b737family`, `-generic-glider`, etc.) whose real container titles aren't published anywhere and can't be read off disk. `tauri-launcher` currently has a temporary hand-rolled decode of this exact struct directly in `src-tauri/src/simconnect.rs` reading raw `PacketReader` bytes (see that file's own `RECV_ID_ENUMERATE_SIMOBJECT_AND_LIVERY_LIST` constant/comment) — once this crate publishes a version bump with this decoder, that hand-rolled copy should be deleted in favor of depending on `recv::sunrise::parse_enumerate_simobject_and_livery_list` directly. Not done as part of this change since it's a separate repo/version-bump/dependency-bump step. |
 
 ## Zero-copy pass — read side only
 
@@ -73,13 +76,23 @@ C header. Live MSFS2024 ("SunRise") passes have confirmed, end to end:
   `_EX1` is scoped to nearby facilities, not a synonym for "all"),
   `request_system_state` (`"AircraftLoaded"`), `unsubscribe_to_facilities`,
   `camera_acquire`/`RECV_CAMERA_STATUS`,
-  `enumerate_sim_objects_and_liveries`, `get_input_event`.
+  `enumerate_sim_objects_and_liveries` and its
+  `RECV_ENUMERATE_SIMOBJECT_AND_LIVERY_LIST` reply decode (73 pages, 5696
+  entries, zero decode errors), `get_input_event`.
 - COM frequency read/write (`set_com_frequency_bcd16`/`set_com_frequency_hz`)
   — found transmitting with a nonexistent notification group id `0`,
   **fixed** by using `EventFlags::GROUP_ID_IS_PRIORITY` +
   `group_priority::HIGHEST` instead; now live-confirmed both directions,
   plus raw (no-wrapper) `COM_STBY_RADIO_SET_HZ`/`COM_STBY_RADIO_SWAP` with
   the same fix.
+- Freezing a created AI aircraft in place via named client events
+  (`FREEZE_LATITUDE_LONGITUDE_SET`/`FREEZE_ALTITUDE_SET`/`FREEZE_ATTITUDE_SET`,
+  each `data0 = 1`, targeting the assigned object id), and writing its
+  generic light simvars (`LIGHT NAV`/`LIGHT BEACON`/`LIGHT STROBE`/
+  `LIGHT LANDING`/`LIGHT TAXI`, all `bool`) via `set_data_on_sim_object` —
+  a position readback after freezing matched the requested lat/lon/alt
+  exactly, and none of ~200 sequential light writes over a live session
+  drew a `RECV_EXCEPTION`. See `simconnect/examples/drone_light_show.rs`.
 
 Still outstanding against a real sim: facility data (send side beyond the
 OPEN/CLOSE AIRPORT bracketing requirement — confirmed required, not yet

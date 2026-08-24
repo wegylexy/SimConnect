@@ -625,6 +625,7 @@ pub mod kittyhawk {
 #[cfg(feature = "sunrise")]
 pub mod sunrise {
     use super::*;
+    use crate::recv::kittyhawk::{parse_list_template, ListTemplate};
 
     /// `RecvId::CameraStatus`'s reply (`camera_acquire`'s reply, among
     /// others) — live-confirmed against a real MSFS2024 instance:
@@ -641,6 +642,43 @@ pub mod sunrise {
             acquired_state: r.u32()?,
             game_controlled: r.bool32()?,
         })
+    }
+
+    /// One entry of `RecvId::EnumerateSimobjectAndLiveryList`'s reply
+    /// (`send::enumerate_sim_objects_and_liveries`'s reply) — see GAPS.md
+    /// for how this layout was derived; not yet live-confirmed.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct EnumerateSimobjectLivery {
+        pub aircraft_title: String,
+        pub livery_name: String,
+    }
+
+    fn parse_enumerate_simobject_livery(
+        r: &mut PacketReader,
+    ) -> Result<EnumerateSimobjectLivery, TooShort> {
+        Ok(EnumerateSimobjectLivery {
+            aircraft_title: r.fixed_str(256)?,
+            livery_name: r.fixed_str(256)?,
+        })
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct RecvEnumerateSimobjectAndLiveryList {
+        pub list: ListTemplate,
+        pub entries: Vec<EnumerateSimobjectLivery>,
+    }
+
+    /// Response can be paginated across multiple packets for a large
+    /// install (`list.entry_number`/`list.out_of`) — a caller needs to
+    /// accumulate across all pages before treating the list as complete.
+    pub fn parse_enumerate_simobject_and_livery_list(
+        r: &mut PacketReader,
+    ) -> Result<RecvEnumerateSimobjectAndLiveryList, TooShort> {
+        let list = parse_list_template(r)?;
+        let entries = (0..list.array_size)
+            .map(|_| parse_enumerate_simobject_livery(r))
+            .collect::<Result<_, _>>()?;
+        Ok(RecvEnumerateSimobjectAndLiveryList { list, entries })
     }
 }
 
@@ -908,6 +946,25 @@ mod tests {
             let status = parse_camera_status(&mut r).unwrap();
             assert_eq!(status.acquired_state, 1);
             assert!(status.game_controlled);
+        }
+
+        #[test]
+        fn enumerate_simobject_and_livery_list_round_trips_one_entry() {
+            let mut w = PacketWriter::new_inbound(38, 4);
+            w.u32(1).u32(1).u32(0).u32(1); // list template
+            w.fixed_str(256, "fs24-asobo-passiveaircraft-a320family")
+                .unwrap();
+            w.fixed_str(256, "Livery.Default").unwrap();
+            let packet = w.finish_inbound();
+            let mut r = PacketReader::new(&packet);
+            r.header().unwrap();
+            let list = parse_enumerate_simobject_and_livery_list(&mut r).unwrap();
+            assert_eq!(list.entries.len(), 1);
+            assert_eq!(
+                list.entries[0].aircraft_title,
+                "fs24-asobo-passiveaircraft-a320family"
+            );
+            assert_eq!(list.entries[0].livery_name, "Livery.Default");
         }
     }
 }
