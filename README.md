@@ -6,9 +6,12 @@ linked into any Rust binary (Windows, or remote/cross-platform over TCP).
 
 This branch is a Rust port of an earlier C# implementation (see
 `main`/`dev`), targeting FSX's protocol range as the core scope for now.
-MSFS 2020 ("KittyHawk") and MSFS 2024 ("SunRise") protocol entries and
-opcodes are also included, behind the `kittyhawk`/`sunrise` feature flags
-described below.
+MSFS 2020 ("KittyHawk") and MSFS 2024 ("SunRise") opcodes are also
+included, behind the `kittyhawk`/`sunrise` feature flags described below.
+Both releases share one protocol entry (`ProtocolVersion::Msfs`) because
+they share one packet format; which release you are actually connected to
+comes from `SimConnect::product()` (`SimProduct`), read from the name the
+sim reports for itself in its `Open` reply.
 
 ## Crates
 
@@ -50,7 +53,7 @@ feature surface, not for basic connectivity.
 # default: full 2024-capable negotiation
 cargo build
 
-# capped at FSX/MSFS2020 (no SunRise entry)
+# capped at the MSFS 2020 opcode set (no `opcode::sunrise`)
 cargo build --no-default-features --features kittyhawk
 ```
 
@@ -86,7 +89,8 @@ struct Radios {
 }
 
 let sim = simconnect::SimConnect::open_local("my-addon").await?; // Windows named pipe
-println!("negotiated: {:?}", sim.protocol());
+println!("negotiated: {:?}", sim.protocol()); // packet format
+println!("sim: {:?}", sim.product()); // which product, per the sim itself
 
 let radios = sim.define_data::<Radios>(1).await?; // one AddToDataDefinition per field
 sim.request_data_on_sim_object(1, radios.define_id(), 0, Period::Second, DataRequestFlags::empty(), 0, 0, 0).await?;
@@ -347,7 +351,7 @@ large fraction of these names.
 | Capability | Official SDK (2024) | Prior C# client (`main`/`dev`) | This crate |
 |---|---|---|---|
 | Transport | Named pipe, TCP | Named pipe only, hardcoded path | Named pipe + TCP + `SimConnect.cfg` discovery |
-| Protocol table | RTM…SunRise (12.2/282174.999) | RTM…FSX SE beta (10/63003) | Same 5-entry table, reconnect-per-attempt negotiation |
+| Protocol table | RTM…Msfs (12.2/282174.999) | RTM…FSX SE beta (10/63003) | 4 entries, one per accepted format, reconnect-per-attempt negotiation; product identity comes from `Open`'s `szApplicationName`, not the negotiated entry |
 | `RECV_ID` coverage | 39+ (incl. `FlowEvent`) | 27 (FSX set) | 36 (FSX set + MSFS2020 facility/jetway/controllers/input-event enumeration; `FlowEvent` and a few input-event opcodes still open) |
 | Facility APIs | Modern (`FACILITY_DATA`, `JETWAY_DATA`, ...) + legacy lists | Legacy lists only | Modern facility/jetway data only — legacy `AIRPORT_LIST`/`VOR_LIST`/`NDB_LIST`/`WAYPOINT_LIST` decode isn't implemented (no confirmed opcode/struct source) |
 | COM frequency (8.33 kHz) | `Units="Hz"` datum + `_HZ` client events | BCD16 only (25 kHz) | Both — `set_com_frequency_hz`/`set_com_frequency_bcd16` convenience methods |

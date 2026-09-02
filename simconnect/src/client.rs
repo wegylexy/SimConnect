@@ -23,7 +23,8 @@ use simconnect_proto::enums::{
     group_priority, DataRequestFlags, DataSetFlags, DataType, EventFlags, Period, SimObjectType,
 };
 use simconnect_proto::events;
-use simconnect_proto::protocol::ProtocolVersion;
+use simconnect_proto::protocol::{ProtocolVersion, SimProduct};
+use simconnect_proto::recv::RecvOpen;
 use simconnect_proto::strings::FixedStringError;
 
 use simconnect_proto::bcd::FrequencyBcd16;
@@ -241,6 +242,26 @@ impl SimConnect {
 
     pub fn protocol(&self) -> ProtocolVersion {
         self.connection.protocol
+    }
+
+    /// The sim's own `SIMCONNECT_RECV_OPEN` reply, kept for the life of the
+    /// connection — the name it reported for itself and both version
+    /// quadruples.
+    ///
+    /// Prefer [`Self::product`] for the "which sim is this" question; this is
+    /// here for logging the raw report and for the build numbers, which no
+    /// other accessor exposes.
+    pub fn open(&self) -> &RecvOpen {
+        &self.connection.open
+    }
+
+    /// Which simulator is on the other end, from the name it reported in its
+    /// `Open` reply — see [`SimProduct`], and use this rather than
+    /// [`Self::protocol`] for anything product-specific. The negotiated
+    /// protocol identifies a packet format and cannot tell MSFS 2020 from
+    /// 2024; this can.
+    pub fn product(&self) -> SimProduct {
+        SimProduct::from_application_name(&self.connection.open.application_name)
     }
 
     /// Awaits the next raw inbound packet, copied into a fresh `Vec<u8>`.
@@ -811,8 +832,8 @@ impl SimConnect {
     }
 
     /// Sets a COM radio's frequency, automatically picking the exact-Hz
-    /// event on a connection that negotiated MSFS2020+ ("KittyHawk" or
-    /// newer) and the legacy 25 kHz BCD16 event otherwise (FSX/pre-2020,
+    /// event on a connection that negotiated the MSFS packet format
+    /// and the legacy 25 kHz BCD16 event otherwise (FSX/pre-2020,
     /// where the `_HZ` events don't exist). This is the method to reach
     /// for by default.
     ///
@@ -842,7 +863,7 @@ impl SimConnect {
         event_id: u32,
         hz: u32,
     ) -> Result<u32, ClientError> {
-        if self.negotiated_at_least_kittyhawk() {
+        if self.negotiated_msfs() {
             self.set_com_frequency_hz(radio, event_id, hz).await
         } else if hz % 25_000 == 0 {
             self.set_com_frequency_bcd16(radio, event_id, hz / 1000)
@@ -853,15 +874,15 @@ impl SimConnect {
     }
 
     #[cfg(feature = "kittyhawk")]
-    fn negotiated_at_least_kittyhawk(&self) -> bool {
-        self.protocol().at_least_kittyhawk()
+    fn negotiated_msfs(&self) -> bool {
+        self.protocol().is_msfs()
     }
 
     #[cfg(not(feature = "kittyhawk"))]
-    fn negotiated_at_least_kittyhawk(&self) -> bool {
-        // The `kittyhawk` feature is off, so `ProtocolVersion` has no
-        // KittyHawk/SunRise entries to negotiate up to in the first place —
-        // always fall back to the legacy path.
+    fn negotiated_msfs(&self) -> bool {
+        // The `kittyhawk` feature is off, so `ProtocolVersion` has no MSFS entry to
+        // negotiate up to in the first place — always fall back to the legacy
+        // path.
         false
     }
 

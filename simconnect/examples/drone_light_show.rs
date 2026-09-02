@@ -174,8 +174,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     };
-    println!("drone object {object_id} created ~50m ahead, target lat/lon/alt: {}/{}/{}",
-        init_position.latitude, init_position.longitude, init_position.altitude);
+    println!(
+        "drone object {object_id} created ~50m ahead, target lat/lon/alt: {}/{}/{}",
+        init_position.latitude, init_position.longitude, init_position.altitude
+    );
 
     sim.ai_release_control(object_id, 3).await?;
 
@@ -229,11 +231,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     const STEP_MS: u64 = 250;
     const CYCLES: usize = 40;
     let sequence = [
-        Lights { light_nav: true, ..Default::default() },
-        Lights { light_beacon: true, ..Default::default() },
-        Lights { light_strobe: true, ..Default::default() },
-        Lights { light_landing: true, ..Default::default() },
-        Lights { light_taxi: true, ..Default::default() },
+        Lights {
+            light_nav: true,
+            ..Default::default()
+        },
+        Lights {
+            light_beacon: true,
+            ..Default::default()
+        },
+        Lights {
+            light_strobe: true,
+            ..Default::default()
+        },
+        Lights {
+            light_landing: true,
+            ..Default::default()
+        },
+        Lights {
+            light_taxi: true,
+            ..Default::default()
+        },
     ];
     for cycle in 0..CYCLES {
         for (i, state) in sequence.iter().enumerate() {

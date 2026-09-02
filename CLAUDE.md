@@ -114,11 +114,15 @@ generated paths.
    never UB, and identical on every target.
 4. **Protocol version build numbers are provenance-sensitive.** The
    `ProtocolVersion` table in `simconnect-proto/src/protocol.rs` (RTM, SP1,
-   SP2, KittyHawk = MSFS 2020, SunRise = MSFS 2024) is cross-checked against
-   the official SDK's documented major-version cumulative numbering
-   (FSX=10, MSFS2020=11, MSFS2024=12) plus independently-observed exact
-   build numbers (`protocol::tests::kittyhawk_build_number`/
-   `sunrise_build_number` pin them down). This project is MIT and
+   SP2, Msfs) is cross-checked against the official SDK's documented
+   major-version cumulative numbering (FSX=10, MSFS2020=11, MSFS2024=12)
+   plus independently-observed exact build numbers
+   (`protocol::tests::msfs_build_number` pins the announced one down). The
+   table has one entry per accepted packet format and never identifies a
+   product: MSFS 2020 accepts the 2024 quadruple, so the 2020 entry it used
+   to carry was unreachable and, worse, invited consumers to read a
+   negotiated value as the sim's release. `SimProduct` answers that from the
+   sim's own `szApplicationName`. This project is MIT and
    deliberately doesn't cite or attribute any LGPL-licensed project as a
    source in docs or code, even for facts (only copied *code* creates a
    licensing obligation, but the project's policy is to keep the citation
