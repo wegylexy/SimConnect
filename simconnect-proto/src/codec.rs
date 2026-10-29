@@ -10,6 +10,9 @@
 //! produce an unaligned reference. A cursor sidesteps the hazard entirely
 //! and works identically on every target.
 
+use alloc::{string::String, vec::Vec};
+use core::fmt;
+
 use crate::strings::{decode_fixed, encode_fixed, FixedStringError};
 
 pub struct PacketWriter {
@@ -127,13 +130,13 @@ pub struct PacketReader<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TooShort;
 
-impl std::fmt::Display for TooShort {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for TooShort {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "packet buffer too short for the requested field")
     }
 }
 
-impl std::error::Error for TooShort {}
+impl core::error::Error for TooShort {}
 
 impl<'a> PacketReader<'a> {
     pub fn new(buf: &'a [u8]) -> Self {

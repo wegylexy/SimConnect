@@ -3,6 +3,9 @@
 //! (modern facility data requests, input-event enumeration, controllers
 //! list) added since — camera and CommBus sends remain unimplemented.
 
+#[cfg(feature = "kittyhawk")]
+use alloc::string::String;
+
 use crate::codec::PacketWriter;
 use crate::enums::{DataRequestFlags, DataSetFlags, EventFlags, Period, SimObjectType};
 use crate::protocol::ProtocolVersion;
@@ -1149,6 +1152,8 @@ pub fn enumerate_sim_objects_and_liveries(
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec;
+
     use super::*;
     use crate::codec::PacketReader;
     use crate::data::InitPosition;

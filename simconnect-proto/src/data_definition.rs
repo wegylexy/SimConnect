@@ -5,6 +5,8 @@
 //! client reference it through one path, `simconnect::proto::data_definition`
 //! (re-exported), without either depending on the other in a cycle.
 
+use alloc::vec::Vec;
+
 use crate::codec::TooShort;
 use crate::enums::DataType;
 use crate::strings::FixedStringError;

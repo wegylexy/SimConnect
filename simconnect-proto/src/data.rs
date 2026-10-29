@@ -5,6 +5,8 @@
 //! byte buffer (`RecvSimObjectData::data`, `send::set_data_on_sim_object`'s
 //! `data` argument), not whole packets on their own.
 
+use alloc::{string::String, vec::Vec};
+
 use crate::codec::{PacketReader, TooShort};
 use crate::strings::{encode_fixed, FixedStringError};
 
@@ -178,8 +180,9 @@ impl MarkerState {
 mod tests {
     use super::*;
     use crate::codec::PacketReader;
+    use alloc::string::ToString;
 
-    fn round_trip<T: PartialEq + std::fmt::Debug>(
+    fn round_trip<T: PartialEq + core::fmt::Debug>(
         value: T,
         write: impl Fn(&T, &mut Vec<u8>),
         read: impl Fn(&mut PacketReader) -> Result<T, TooShort>,

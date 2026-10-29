@@ -11,6 +11,8 @@
 //! [`FrequencyBcd16::write_le`]: the wire format for both actually widens
 //! it to 4 bytes, matching the C# originals' `int`-typed backing field.)
 
+use alloc::vec::Vec;
+
 /// A 16-bit value with four base-10 digits packed one per nibble (standard
 /// BCD), e.g. `TRANSPONDER CODE:1` reads back as decimal squawk digits
 /// packed this way in some data definitions.

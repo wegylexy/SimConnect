@@ -8,7 +8,8 @@
 //! losslessly without a dependency — this is the same fix applied to the
 //! prior C# client (see the `d652be7` commit on the old `main` branch).
 
-use std::fmt;
+use alloc::{string::String, vec::Vec};
+use core::fmt;
 
 /// Error returned when a string can't be encoded as fixed-width Latin-1,
 /// either because it contains a codepoint above U+00FF or because it (plus
@@ -28,7 +29,7 @@ impl fmt::Display for FixedStringError {
     }
 }
 
-impl std::error::Error for FixedStringError {}
+impl core::error::Error for FixedStringError {}
 
 /// Encodes `s` as Latin-1 into `buf`, NUL-terminating and zero-padding the
 /// remainder. `buf.len()` is the full wire width (e.g. 256 for `String256`).
@@ -91,6 +92,7 @@ fixed_string_type!(String260, 260);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::string::ToString;
 
     #[test]
     fn round_trips_ascii() {

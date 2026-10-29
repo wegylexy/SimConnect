@@ -2,6 +2,8 @@
 //! client). Each `parse_*` function expects the reader positioned just past
 //! the common `Recv` header (already consumed via `PacketReader::header`).
 
+use alloc::{string::String, vec::Vec};
+
 use crate::codec::{PacketReader, TooShort};
 use crate::enums::SimConnectException;
 use crate::protocol::SimConnectVersion;

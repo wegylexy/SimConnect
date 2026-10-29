@@ -232,6 +232,8 @@ mod tests {
     /// only ever be dead — and was read as product identity instead.
     #[test]
     fn one_negotiation_entry_per_wire_version() {
+        use alloc::vec::Vec;
+
         let mut seen: Vec<u32> = ProtocolVersion::negotiation_order()
             .iter()
             .map(|p| p.wire_version())
