@@ -627,7 +627,7 @@ pub mod kittyhawk {
 #[cfg(feature = "sunrise")]
 pub mod sunrise {
     use super::*;
-    use crate::recv::kittyhawk::{parse_list_template, ListTemplate};
+    use crate::recv::kittyhawk::{ListTemplate, parse_list_template};
 
     /// `RecvId::CameraStatus`'s reply (`camera_acquire`'s reply, among
     /// others) — live-confirmed against a real MSFS2024 instance:

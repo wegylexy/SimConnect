@@ -137,7 +137,7 @@ impl FrequencyBcd16 {
     /// same as the original C# encoder.
     pub fn from_khz(khz: u32) -> Self {
         let x_full = khz / 10; // truncates the ones-of-kHz digit
-                               // Drop the implied leading "1" of the 1xx.xx MHz band (see `to_khz`).
+        // Drop the implied leading "1" of the 1xx.xx MHz band (see `to_khz`).
         let x = x_full % 10_000;
         let digits = [
             (x / 1000 % 10) as u8,

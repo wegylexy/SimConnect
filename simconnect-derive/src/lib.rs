@@ -18,7 +18,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::{parse_macro_input, Data, DeriveInput, Field, Fields, LitStr, Type};
+use syn::{Data, DeriveInput, Field, Fields, LitStr, Type, parse_macro_input};
 
 /// `__suffix` → SimConnect `Units` string, covering the SDK's documented
 /// "Units of Measurement" table. SimConnect unit strings have irregular
@@ -185,7 +185,7 @@ fn parse_simconnect_attr(field: &Field) -> syn::Result<FieldAttr> {
                     syn::Lit::Float(f) => f.base10_parse()?,
                     syn::Lit::Int(i) => i.base10_parse::<i64>()? as f32,
                     other => {
-                        return Err(syn::Error::new_spanned(other, "epsilon must be a number"))
+                        return Err(syn::Error::new_spanned(other, "epsilon must be a number"));
                     }
                 });
             } else {
@@ -376,7 +376,7 @@ fn map_type(type_name: &str, ident: &syn::Ident) -> syn::Result<TypeMapping> {
                      supported types: bool, i32, i64, f32, f64, String8..String260, \
                      Waypoint, LatLonAlt, Xyz, MarkerState, Bco16, FrequencyBcd16"
                 ),
-            ))
+            ));
         }
     })
 }
@@ -390,14 +390,14 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
                 return Err(syn::Error::new_spanned(
                     &input,
                     "#[derive(DataDefinition)] requires a struct with named fields",
-                ))
+                ));
             }
         },
         _ => {
             return Err(syn::Error::new_spanned(
                 &input,
                 "#[derive(DataDefinition)] can only be derived for structs",
-            ))
+            ));
         }
     };
 
@@ -451,7 +451,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
                          unit conversion, remove #[simconnect(units = ...)] (and any `__unit` \
                          suffix) from this field"
                     ),
-                ))
+                ));
             }
             UnitsMode::Required(expected) if units.as_deref() != Some(expected) => {
                 return Err(syn::Error::new_spanned(
@@ -459,7 +459,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
                     format!(
                         "field type `{type_name}` requires #[simconnect(units = \"{expected}\")]"
                     ),
-                ))
+                ));
             }
             _ => {}
         }

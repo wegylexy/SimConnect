@@ -3,6 +3,7 @@ name = "flybywireless-simconnect"
 description = "Pure-Rust SimConnect client (named pipe or TCP), no SimConnect.dll dependency."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
@@ -21,8 +22,8 @@ categories.workspace = true
 name = "simconnect"
 
 [dependencies]
-simconnect-proto = { package = "flybywireless-simconnect-proto", version = "0.2.0", path = "../simconnect-proto", default-features = false }
-simconnect-derive = { package = "flybywireless-simconnect-derive", version = "0.2.0", path = "../simconnect-derive" }
+simconnect-proto = { package = "flybywireless-simconnect-proto", version = "0.2.1", path = "../simconnect-proto", default-features = false }
+simconnect-derive = { package = "flybywireless-simconnect-derive", version = "0.2.1", path = "../simconnect-derive" }
 tokio = { version = "1", features = ["rt", "net", "sync", "io-util", "macros", "time"] }
 
 [features]

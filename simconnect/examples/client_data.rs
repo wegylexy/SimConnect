@@ -17,9 +17,9 @@
 
 use std::env;
 
+use simconnect::DataDefinition;
 use simconnect::proto::enums::{DataRequestFlags, Period};
 use simconnect::proto::recv::{self};
-use simconnect::DataDefinition;
 
 #[derive(DataDefinition, Debug, Clone, PartialEq)]
 struct SharedState {

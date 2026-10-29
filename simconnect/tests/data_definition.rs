@@ -5,11 +5,11 @@
 //! needed, since this only tests the compile-time codegen and its
 //! generated methods.
 
+use simconnect::DataDefinition;
 use simconnect::proto::bcd::{Bco16, FrequencyBcd16};
 use simconnect::proto::data::{LatLonAlt, MarkerState, Waypoint, Xyz};
 use simconnect::proto::enums::DataType;
 use simconnect::proto::strings::String256;
-use simconnect::DataDefinition;
 
 #[derive(DataDefinition, Debug, PartialEq)]
 struct Everything {

@@ -5,6 +5,12 @@
 
 use std::env;
 
+// mimalloc: faster small-object allocation than the system allocator and
+// returns freed memory to the OS more eagerly. Only the binary picks the
+// allocator; the library crates stay allocator-agnostic.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let app_name = "simconnect-cli";

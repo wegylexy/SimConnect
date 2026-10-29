@@ -13,7 +13,7 @@
 use alloc::{string::String, vec::Vec};
 use core::fmt;
 
-use crate::strings::{decode_fixed, encode_fixed, FixedStringError};
+use crate::strings::{FixedStringError, decode_fixed, encode_fixed};
 
 pub struct PacketWriter {
     buf: Vec<u8>,

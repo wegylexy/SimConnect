@@ -38,7 +38,7 @@ fn documents_folder() -> Option<PathBuf> {
     };
 
     #[link(name = "shell32")]
-    extern "system" {
+    unsafe extern "system" {
         fn SHGetKnownFolderPath(
             rfid: *const KnownFolderId,
             dwFlags: u32,
@@ -48,7 +48,7 @@ fn documents_folder() -> Option<PathBuf> {
     }
 
     #[link(name = "ole32")]
-    extern "system" {
+    unsafe extern "system" {
         fn CoTaskMemFree(pv: *mut std::ffi::c_void);
     }
 

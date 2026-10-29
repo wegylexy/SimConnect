@@ -20,7 +20,7 @@ use std::io;
 use std::sync::Arc;
 
 use simconnect_proto::enums::{
-    group_priority, DataRequestFlags, DataSetFlags, DataType, EventFlags, Period, SimObjectType,
+    DataRequestFlags, DataSetFlags, DataType, EventFlags, Period, SimObjectType, group_priority,
 };
 use simconnect_proto::events;
 use simconnect_proto::protocol::{ProtocolVersion, SimProduct};
@@ -113,7 +113,7 @@ pub enum ComRadio {
 impl ComRadio {
     pub(crate) fn hz_event_name(self) -> &'static str {
         use events::client::radio_navigation::{
-            COM2_RADIO_SET_HZ, COM3_RADIO_SET_HZ, COM_RADIO_SET_HZ,
+            COM_RADIO_SET_HZ, COM2_RADIO_SET_HZ, COM3_RADIO_SET_HZ,
         };
         match self {
             Self::Com1 => COM_RADIO_SET_HZ,
@@ -123,7 +123,7 @@ impl ComRadio {
     }
 
     pub(crate) fn bcd16_event_name(self) -> &'static str {
-        use events::client::radio_navigation::{COM2_RADIO_SET, COM3_RADIO_SET, COM_RADIO_SET};
+        use events::client::radio_navigation::{COM_RADIO_SET, COM2_RADIO_SET, COM3_RADIO_SET};
         match self {
             Self::Com1 => COM_RADIO_SET,
             Self::Com2 => COM2_RADIO_SET,
@@ -546,7 +546,9 @@ impl SimConnect {
         send_pkt!(
             self,
             packet,
-            format!("RequestDataOnSimObject(request_id: {request_id}, define_id: {define_id}, object_id: {object_id}, period: {period:?})")
+            format!(
+                "RequestDataOnSimObject(request_id: {request_id}, define_id: {define_id}, object_id: {object_id}, period: {period:?})"
+            )
         )
     }
 
@@ -567,7 +569,9 @@ impl SimConnect {
         send_pkt!(
             self,
             packet,
-            format!("RequestDataOnSimObjectType(request_id: {request_id}, define_id: {define_id}, type: {object_type:?})")
+            format!(
+                "RequestDataOnSimObjectType(request_id: {request_id}, define_id: {define_id}, type: {object_type:?})"
+            )
         )
     }
 
@@ -653,7 +657,9 @@ impl SimConnect {
         Ok(send_pkt!(
             self,
             packet,
-            format!("AiCreateParkedAtcAircraft(title: {container_title:?}, tail: {tail_number:?}, airport: {airport_id:?}, request_id: {request_id})")
+            format!(
+                "AiCreateParkedAtcAircraft(title: {container_title:?}, tail: {tail_number:?}, airport: {airport_id:?}, request_id: {request_id})"
+            )
         )?)
     }
 
@@ -684,7 +690,9 @@ impl SimConnect {
         Ok(send_pkt!(
             self,
             packet,
-            format!("AiCreateEnrouteAtcAircraft(title: {container_title:?}, tail: {tail_number:?}, request_id: {request_id})")
+            format!(
+                "AiCreateEnrouteAtcAircraft(title: {container_title:?}, tail: {tail_number:?}, request_id: {request_id})"
+            )
         )?)
     }
 

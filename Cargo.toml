@@ -1,5 +1,5 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
     "simconnect-proto",
     "simconnect-derive",
@@ -8,10 +8,18 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.0"
-edition = "2021"
+version = "0.2.1"
+edition = "2024"
+rust-version = "1.85"
 license = "MIT"
 authors = ["TimTim"]
 repository = "https://github.com/wegylexy/SimConnect"
 keywords = ["simconnect", "msfs", "flight-simulator"]
 categories = ["simulation", "network-programming"]
+
+# Applies only to binaries built from this workspace (simconnect-cli,
+# examples); downstream crates use their own profiles.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true

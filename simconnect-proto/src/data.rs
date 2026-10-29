@@ -8,7 +8,7 @@
 use alloc::{string::String, vec::Vec};
 
 use crate::codec::{PacketReader, TooShort};
-use crate::strings::{encode_fixed, FixedStringError};
+use crate::strings::{FixedStringError, encode_fixed};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LatLonAlt {

@@ -9,9 +9,9 @@
 
 use std::env;
 
+use simconnect::DataDefinition;
 use simconnect::proto::enums::{DataRequestFlags, Period};
 use simconnect::proto::recv::{self};
-use simconnect::DataDefinition;
 
 // `__1__mhz`: a numeric index segment and a unit-alias segment, peeled
 // off the field name and classified by content (not position — `__mhz__1`
